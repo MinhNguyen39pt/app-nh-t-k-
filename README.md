@@ -54,8 +54,12 @@ Vào **Site configuration → Environment variables**:
 
 Sau khi thêm biến, vào **Deploys → Trigger deploy → Deploy site** để biến có hiệu lực.
 
-## 4. Cài lên điện thoại
-Mở site bằng Safari (iPhone) hoặc Chrome (Android), rồi chọn **Chia sẻ → Thêm vào màn hình chính**.
+## 4. Cài thành app riêng (điện thoại / máy tính)
+App là PWA, có biểu tượng PNG và service worker nên cài được như một app thật:
+- **Android (Chrome):** mở site → thanh "📲 Cài Nhật Ký thành app" hiện lên → **Cài**. Nếu không thấy, bấm ⋮ → **Cài đặt ứng dụng**. Sau khi cài, nút *Chia sẻ* trong Facebook/YouTube sẽ có mục **Nhật Ký**.
+- **iPhone (Safari):** bấm **Chia sẻ → Thêm vào MH chính**.
+- **Máy tính (Chrome/Edge):** bấm biểu tượng cài đặt ở cuối thanh địa chỉ, hoặc vào **Cài đặt → 📲 Cài app** trong app.
+- Nếu mở link từ Zalo/Messenger/Facebook, app sẽ chạy trong trình duyệt riêng của các ứng dụng đó và không cài được. Hãy chọn **Mở bằng trình duyệt** trước.
 
 ## 5. Cấu trúc code
 ```

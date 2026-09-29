@@ -7,7 +7,11 @@
 <meta name="theme-color" content="#b4532f">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Nhật Ký">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -164,6 +168,12 @@
         <input id="userName" placeholder="Ví dụ: Chung">
       </div>
 
+      <div class="card" id="installCard">
+        <h3>📲 Cài app lên điện thoại / máy tính</h3>
+        <p class="muted small" id="installHint">Cài để mở như một app riêng: có biểu tượng trên màn hình, mở toàn màn hình, không còn thanh địa chỉ.</p>
+        <button class="btn primary" id="installBtn">📲 Cài app</button>
+      </div>
+
       <div class="card">
         <h3>📚 Lưu link nhanh</h3>
         <p class="muted small"><b>Điện thoại Android:</b> cài app ra màn hình chính (Chrome → ⋮ → Thêm vào màn hình chính). Sau đó trong Facebook/YouTube bấm <b>Chia sẻ</b> → chọn <b>Nhật Ký</b>.<br>
@@ -198,6 +208,7 @@
   </main>
 
   <button class="fab" id="fab" title="Viết mới">＋</button>
+  <div class="install-bar hidden" id="installBar"><span>📲 Cài Nhật Ký thành app trên máy này?</span><button class="btn primary sm" id="installBarBtn">Cài</button><button class="icon-btn" id="installBarX" title="Để sau">✕</button></div>
 </div>
 
 <!-- Modal dùng chung -->

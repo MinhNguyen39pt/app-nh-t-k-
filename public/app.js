@@ -1558,7 +1558,7 @@ $('#driveSync').addEventListener('click', () => Drive.sync(true));
 $('#driveRestore').addEventListener('click', async () => { await Drive.restore(); });
 
 // ============ Cài đặt ============
-RENDER.settings = function () { fillSettings(); Drive.showStatus(); if (Drive.clientId()) Drive.loadGis().catch(() => {}); };
+RENDER.settings = function () { fillSettings(); updateInstallCard(); Drive.showStatus(); if (Drive.clientId()) Drive.loadGis().catch(() => {}); };
 function fillSettings() {
   $('#aiModel').value = S.settings.model || '';
   $('#aiModel').placeholder = S.cfg.model || 'gemini-2.5-flash';
@@ -1600,6 +1600,45 @@ $('#importJson').addEventListener('change', async (ev) => {
   } catch (e) { toast('Lỗi nhập: ' + e.message); }
   ev.target.value = '';
 });
+
+// ============ Cài thành app (PWA) ============
+let installEvt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const inAppBrowser = () => /FBAN|FBAV|Instagram|Zalo|Line\/|Messenger|TikTok/i.test(navigator.userAgent);
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); installEvt = e;
+  let dismissed = false; try { dismissed = localStorage.getItem('nk_install_x') === '1'; } catch {}
+  if (!dismissed && !$('#app').classList.contains('hidden')) $('#installBar').classList.remove('hidden');
+  updateInstallCard();
+});
+window.addEventListener('appinstalled', () => { installEvt = null; $('#installBar').classList.add('hidden'); updateInstallCard(); toast('Đã cài app ✓ — mở từ biểu tượng Nhật Ký trên màn hình'); });
+function installHelp() {
+  if (inAppBrowser()) return 'Bạn đang mở trong trình duyệt của Zalo/Facebook — không cài được. Bấm ⋮ hoặc ··· rồi chọn <b>"Mở bằng trình duyệt"</b> (Chrome/Safari), sau đó cài lại.';
+  if (isIOS()) return 'Trên iPhone/iPad: mở bằng <b>Safari</b> → bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên lên) → kéo xuống chọn <b>"Thêm vào MH chính"</b> → <b>Thêm</b>.';
+  return 'Trên Android: mở bằng <b>Chrome</b> → bấm <b>⋮</b> (góc trên phải) → <b>"Cài đặt ứng dụng"</b> hoặc <b>"Thêm vào màn hình chính"</b>. Trên máy tính: bấm biểu tượng cài đặt ở cuối thanh địa chỉ.';
+}
+function updateInstallCard() {
+  if (!$('#installHint')) return;
+  if (isStandalone()) { $('#installHint').innerHTML = '✅ Bạn đang dùng Nhật Ký dưới dạng app đã cài.'; $('#installBtn').classList.add('hidden'); return; }
+  $('#installBtn').classList.remove('hidden');
+  $('#installHint').innerHTML = installEvt ? 'Bấm nút dưới để cài Nhật Ký thành app riêng trên máy này.' : installHelp();
+}
+async function doInstall() {
+  if (installEvt) {
+    installEvt.prompt();
+    const r = await installEvt.userChoice.catch(() => ({}));
+    if (r.outcome === 'accepted') installEvt = null;
+    $('#installBar').classList.add('hidden');
+    updateInstallCard();
+  } else {
+    openModal(`<div class="sheet-head"><h3>📲 Cài app</h3><button class="icon-btn" data-close>✕</button></div><p>${installHelp()}</p><div class="sheet-foot"><button class="btn primary" data-close>Đã hiểu</button></div>`);
+  }
+}
+$('#installBtn').addEventListener('click', doInstall);
+$('#installBarBtn').addEventListener('click', doInstall);
+$('#installBarX').addEventListener('click', () => { $('#installBar').classList.add('hidden'); try { localStorage.setItem('nk_install_x', '1'); } catch {} });
 
 // ============ Khởi động ============
 window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (v && v !== S.view && !$('#app').classList.contains('hidden')) go(v); });
