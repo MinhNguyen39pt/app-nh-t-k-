@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nhật Ký Riêng</title>
+<meta name="theme-color" content="#b4532f">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<!-- Đăng nhập -->
+<div id="login" class="login hidden">
+  <form class="login-card" id="loginForm">
+    <div class="logo-big">📖</div>
+    <h1>Nhật Ký Riêng</h1>
+    <p class="muted">Nơi cất giữ ngày tháng, bài học, nơi chốn và những thứ hay ho của bạn.</p>
+    <input type="password" id="loginPass" placeholder="Mật khẩu" autocomplete="current-password" required>
+    <button class="btn primary block" type="submit">Mở nhật ký</button>
+    <p id="loginErr" class="err"></p>
+  </form>
+</div>
+
+<div id="app" class="app hidden">
+  <nav class="nav" id="nav">
+    <div class="brand"><span>📖</span><b>Nhật Ký Riêng</b></div>
+    <button data-view="timeline" class="active"><i>🗓️</i><span>Nhật ký</span></button>
+    <button data-view="links"><i>📚</i><span>Kho link</span></button>
+    <button data-view="map"><i>🗺️</i><span>Bản đồ</span></button>
+    <button data-view="photos"><i>🖼️</i><span>Ảnh</span></button>
+    <button data-view="tuvi"><i>🔮</i><span>Tử vi</span></button>
+    <button data-view="assistant"><i>✨</i><span>Trợ lý</span></button>
+    <button data-view="stats"><i>📊</i><span>Thống kê</span></button>
+    <button data-view="settings"><i>⚙️</i><span>Cài đặt</span></button>
+    <div class="nav-foot" id="syncBadge"></div>
+  </nav>
+
+  <main class="main">
+    <!-- DÒNG THỜI GIAN -->
+    <section id="v-timeline" class="view active">
+      <header class="vhead">
+        <div>
+          <h2 id="greet">Xin chào</h2>
+          <p class="muted" id="todayLine"></p>
+        </div>
+      </header>
+
+      <div class="card capture">
+        <textarea id="quick" rows="3" placeholder="Hôm nay có gì? Kể bừa ra đây, hoặc dán link — AI sẽ sắp xếp giúp bạn…"></textarea>
+        <div class="row gap wrap">
+          <button class="btn ghost sm" id="quickMic" title="Nói để ghi">🎙️ Nói</button>
+          <span class="grow"></span>
+          <button class="btn ghost sm" id="quickSave">Lưu nhanh</button>
+          <button class="btn primary sm" id="quickAI">✨ AI sắp xếp</button>
+        </div>
+      </div>
+
+      <div id="onThisDay"></div>
+
+      <div class="filters">
+        <input type="search" id="search" placeholder="Tìm trong nhật ký…">
+        <div class="chips" id="typeChips"></div>
+        <select id="tagFilter"><option value="">Tất cả thẻ</option></select>
+      </div>
+      <div id="timeline"></div>
+    </section>
+
+    <!-- KHO LINK -->
+    <section id="v-links" class="view">
+      <header class="vhead">
+        <div><h2>Kho link</h2><p class="muted" id="linkCount">Lưu link Facebook, YouTube, bài báo… kèm tóm tắt và phân loại.</p></div>
+        <button class="btn primary" id="linkAdd">＋ Thêm link</button>
+      </header>
+      <div class="card capture">
+        <div class="row gap"><input id="linkQuick" placeholder="Dán link vào đây rồi Enter (có thể dán nhiều link, mỗi dòng một link)"><button class="btn primary" id="linkQuickBtn">Lưu</button></div>
+      </div>
+      <div class="filters">
+        <input type="search" id="linkSearch" placeholder="Tìm theo tiêu đề, tóm tắt, ghi chú, kênh…">
+        <div class="chips" id="linkCats"></div>
+        <div class="chips" id="linkPlat"></div>
+      </div>
+      <div class="row gap wrap" style="margin:6px 0 12px">
+        <span class="muted small" id="linkShown"></span><span class="grow"></span>
+        <button class="btn ghost sm" id="linkAI">✨ AI tổng hợp các link đang lọc</button>
+      </div>
+      <div class="card hidden" id="linkAIcard"><div class="md" id="linkAIout"></div></div>
+      <div id="linkGrid" class="link-grid"></div>
+    </section>
+
+    <!-- BẢN ĐỒ -->
+    <section id="v-map" class="view">
+      <header class="vhead"><div><h2>Bản đồ kỷ niệm</h2><p class="muted" id="mapCount"></p></div></header>
+      <div id="map" class="map"></div>
+      <div id="placeList" class="place-list"></div>
+    </section>
+
+    <!-- ẢNH -->
+    <section id="v-photos" class="view">
+      <header class="vhead"><div><h2>Thư viện ảnh</h2><p class="muted" id="photoCount"></p></div></header>
+      <div id="gallery" class="gallery"></div>
+    </section>
+
+    <!-- TỬ VI -->
+    <section id="v-tuvi" class="view">
+      <header class="vhead">
+        <div><h2>Lá số tử vi</h2><p class="muted">An sao tự động, AI luận giải và đối chiếu với nhật ký của bạn.</p></div>
+      </header>
+      <div id="tuvi"></div>
+    </section>
+
+    <!-- TRỢ LÝ -->
+    <section id="v-assistant" class="view">
+      <header class="vhead">
+        <div><h2>Trợ lý AI</h2><p class="muted">Hỏi bất cứ điều gì về cuộc sống bạn đã ghi lại.</p></div>
+        <button class="btn ghost sm" id="chatClear">Xoá hội thoại</button>
+      </header>
+      <div class="chips prompts" id="prompts"></div>
+      <div id="chat" class="chat"></div>
+      <form id="chatForm" class="chat-input">
+        <textarea id="chatText" rows="1" placeholder="Ví dụ: Tháng này tôi hay buồn vào lúc nào? Vì sao?"></textarea>
+        <button class="btn primary" type="submit">Gửi</button>
+      </form>
+    </section>
+
+    <!-- THỐNG KÊ -->
+    <section id="v-stats" class="view">
+      <header class="vhead"><div><h2>Thống kê</h2><p class="muted">Nhìn lại hành trình ghi chép của bạn.</p></div></header>
+      <div id="stats"></div>
+    </section>
+
+    <!-- CÀI ĐẶT -->
+    <section id="v-settings" class="view">
+      <header class="vhead"><div><h2>Cài đặt</h2></div></header>
+
+      <div class="card">
+        <h3>☁️ Google Drive</h3>
+        <p class="muted small">App tạo thư mục <b>Nhật Ký Riêng</b> trên Drive của bạn, gồm file dữ liệu, bản Markdown theo tháng (đọc được ngay trên Drive) và toàn bộ ảnh. App chỉ thấy các file do chính nó tạo.</p>
+        <div id="driveStatus" class="drive-status"></div>
+        <div class="row gap wrap">
+          <button class="btn primary" id="driveSync">Đồng bộ lên Drive</button>
+          <button class="btn ghost" id="driveRestore">Khôi phục từ Drive</button>
+        </div>
+        <label class="check"><input type="checkbox" id="driveAuto"> Tự đồng bộ sau mỗi lần lưu (khi đã kết nối trong phiên)</label>
+        <details class="small">
+          <summary>Google Client ID</summary>
+          <p class="muted">Lấy trong Google Cloud Console (xem file HUONG-DAN-GOOGLE-DRIVE.md). Có thể khai báo bằng biến <code>GOOGLE_CLIENT_ID</code> trên Netlify hoặc dán vào đây.</p>
+          <input id="clientId" placeholder="xxxx.apps.googleusercontent.com">
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>✨ Trí tuệ nhân tạo</h3>
+        <p class="muted small" id="aiStatus"></p>
+        <label class="lbl">Model Gemini</label>
+        <input id="aiModel" placeholder="gemini-2.5-flash">
+        <label class="lbl">Tên gọi của bạn (AI sẽ xưng hô)</label>
+        <input id="userName" placeholder="Ví dụ: Chung">
+      </div>
+
+      <div class="card">
+        <h3>📚 Lưu link nhanh</h3>
+        <p class="muted small"><b>Điện thoại Android:</b> cài app ra màn hình chính (Chrome → ⋮ → Thêm vào màn hình chính). Sau đó trong Facebook/YouTube bấm <b>Chia sẻ</b> → chọn <b>Nhật Ký</b>.<br>
+        <b>iPhone:</b> trong Facebook/YouTube chọn <i>Sao chép liên kết</i> rồi dán vào ô ở tab Kho link.<br>
+        <b>Máy tính:</b> kéo nút dưới đây lên thanh dấu trang; khi đang xem trang nào, bấm nó để lưu trang đó.</p>
+        <a class="btn ghost" id="bookmarklet" href="#">📚 Lưu vào Nhật Ký</a>
+        <label class="check"><input type="checkbox" id="linkAutoAI"> Tự động để AI tóm tắt & phân loại khi thêm link</label>
+        <label class="lbl">Chủ đề riêng của bạn (thêm vào danh sách phân loại, cách nhau bằng dấu phẩy)</label>
+        <input id="linkCustomCats" placeholder="vd: Chứng khoán, Nuôi dạy con, Làm vườn">
+      </div>
+
+      <div class="card">
+        <h3>🎨 Giao diện</h3>
+        <div class="chips" id="themeChips">
+          <button data-theme="auto">Theo máy</button><button data-theme="light">Sáng</button><button data-theme="dark">Tối</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>💾 Dữ liệu</h3>
+        <div class="row gap wrap">
+          <button class="btn ghost" id="exportJson">Tải JSON</button>
+          <button class="btn ghost" id="exportMd">Tải Markdown</button>
+          <label class="btn ghost">Nhập JSON<input type="file" id="importJson" accept=".json,application/json" hidden></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <button class="btn danger" id="logout">Đăng xuất</button>
+      </div>
+    </section>
+  </main>
+
+  <button class="fab" id="fab" title="Viết mới">＋</button>
+</div>
+
+<!-- Modal dùng chung -->
+<div id="modal" class="modal hidden"><div class="sheet" id="sheet"></div></div>
+<div id="lightbox" class="lightbox hidden"><img id="lbImg" alt=""><div id="lbCap"></div></div>
+<div id="toast" class="toast"></div>
+
+<script src="/tuvi.js" defer></script>
+<script src="/app.js" defer></script>
+</body>
+</html>
