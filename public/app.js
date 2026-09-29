@@ -221,7 +221,7 @@ function entryCard(e) {
       ${e.title ? `<div class="e-title">${esc(e.title)}</div>` : ''}
       ${excerpt ? `<div class="e-excerpt">${esc(excerpt)}</div>` : ''}
       ${thumbs ? `<div class="thumbs">${thumbs}${more}</div>` : ''}
-      ${!excerpt && e.links[0] ? `<div class="e-excerpt">🔗 ${esc(plain(e.summary || '').slice(0, 200) || e.links[0].title || e.links[0].url)}</div>` : ''}
+      ${!excerpt && e.links[0] ? `<div class="e-excerpt">🔗 ${esc(e.links[0].title || e.links[0].url)}</div>` : ''}
       <div class="e-meta">
         ${e.mood ? `<span title="${MOOD_NAMES[e.mood]}">${MOODS[e.mood]}</span>` : ''}
         ${e.category ? `<span class="cat">${catIcon(e.category)} ${esc(e.category)}</span>` : ''}
@@ -645,9 +645,9 @@ function openViewer(id) {
     ${e.title ? `<h2>${esc(e.title)}</h2>` : ''}
     ${e.category || e.status ? `<p>${e.category ? `<span class="cat">${catIcon(e.category)} ${esc(e.category)}</span> ` : ''}${e.status ? `<span class="cat">${STATUS[e.status].join(' ')}</span>` : ''}</p>` : ''}
     ${e.type === 'link' && e.links[0] && ytId(e.links[0].url) ? `<div class="yt"><iframe src="https://www.youtube-nocookie.com/embed/${esc(ytId(e.links[0].url))}" allowfullscreen loading="lazy" title="YouTube"></iframe></div>` : ''}
-    ${e.summary ? `<div class="sum-box"><h4>✨ Link này nói gì</h4><div class="md">${md(e.summary)}</div></div>` : ''}
     ${e.content && e.type === 'link' ? '<h4 style="margin:14px 0 4px">📝 Ghi chú của tôi</h4>' : ''}
     <div class="v-content md">${md(e.content)}</div>
+    ${e.summary ? `<div class="sum-box"><h4>✨ Tóm tắt (AI)</h4><div class="md">${md(e.summary)}</div></div>` : ''}
     ${e.photos.length ? `<div class="v-photos">${e.photos.map((p) => `<img src="${photoUrl(p, 1)}" data-full="${photoUrl(p)}" loading="lazy" alt="">`).join('')}</div>` : ''}
     ${e.links.map(linkCard).join('')}
     ${e.location ? `<p style="margin-top:12px">📍 ${esc(e.location.name)} · <a href="https://www.google.com/maps?q=${e.location.lat},${e.location.lng}" target="_blank" rel="noopener">Mở Google Maps</a></p><div class="mini-map" id="miniMap"></div>` : ''}
@@ -758,58 +758,37 @@ function ytId(url) {
 const isLinkEntry = (e) => e.type === 'link' && e.links.length;
 const firstUrl = (text = '') => (text.match(URL_RE) || [])[0] || '';
 
-// Phân tích link bằng AI: YouTube thì Gemini xem thẳng video; trang web thì đọc nội dung chữ
-async function analyzeLink(meta, note = '') {
+// AI chỉ gợi ý phân loại + thẻ dựa trên tiêu đề/mô tả/ghi chú (không xem video, không đọc trang)
+async function suggestCategory(meta, note = '') {
   const cats = allCats();
-  const sys = `Bạn là trợ lý lưu trữ kiến thức cá nhân. Nhiệm vụ: cho người dùng biết link này NÓI GÌ, để sau này họ đọc lại là nhớ ngay mà không cần mở link.
-Trả về JSON:
-{"title": "tiêu đề ngắn gọn bằng tiếng Việt (giữ nguyên tên riêng)",
- "summary": "markdown tiếng Việt gồm: 1 câu **Tóm tắt**; mục **Ý chính** 3-6 gạch đầu dòng cụ thể (số liệu, khái niệm, lập luận); dòng **Đáng nhớ:** một ý đắt giá nhất; nếu là video YouTube và biết mốc thời gian thì ghi (mm:ss) cạnh ý",
- "category": "đúng MỘT trong: ${cats.join(' | ')}",
- "tags": ["2-5 thẻ chữ thường, cụ thể, vd: vũ trụ, lỗ đen"],
- "confidence": "cao | trung bình | thấp"}
-Quy tắc: chỉ dựa trên nội dung được cung cấp (video, văn bản trang, mô tả, ghi chú người dùng). Nếu chỉ có tiêu đề/mô tả ngắn (hay gặp với Facebook), hãy tóm tắt những gì biết được, đặt confidence "thấp" và thêm dòng "_Chưa đọc được toàn bộ nội dung — hãy dán phần chữ bài đăng vào ghi chú rồi bấm tóm tắt lại._". Không bịa.`;
-  const info = `Link: ${meta.url}\nNền tảng: ${meta.platform || platformOf(meta.url)}\nTiêu đề: ${meta.title || ''}\nKênh/Tác giả: ${meta.author || ''}\nMô tả: ${meta.desc || ''}${note ? '\nGhi chú / nội dung người dùng dán vào: ' + note : ''}`;
-  const clean = (r) => ({ ...r, category: cats.includes(r.category) ? r.category : 'Khác', tags: (r.tags || []).map((t) => String(t).toLowerCase().trim()).filter(Boolean).slice(0, 6) });
-  const id = ytId(meta.url);
-  if (meta.platform === 'youtube' && id) {
-    try {
-      return clean(await aiJSON({ system: sys, messages: [{ role: 'user', videos: ['https://www.youtube.com/watch?v=' + id], text: info + '\n\n(Hãy xem video ở trên và tóm tắt nội dung thực tế của video.)' }] }));
-    } catch (e) { console.warn('Video AI lỗi, dùng thông tin mô tả', e); }
-  }
-  let text = '';
-  if ((meta.platform || 'web') === 'web') {
-    try { text = (await api('/api/unfurl?full=1&url=' + encodeURIComponent(meta.url))).text || ''; } catch {}
-  }
-  return clean(await aiJSON({ system: sys, messages: [{ role: 'user', text: info + (text ? '\n\nNỘI DUNG TRANG:\n' + text.slice(0, 18000) : '') }] }));
+  const r = await aiJSON({
+    system: `Phân loại một link người dùng lưu lại. Chỉ dựa vào tiêu đề, kênh, mô tả và ghi chú. Trả JSON {"category": "đúng MỘT trong: ${cats.join(' | ')}", "tags": ["1-3 thẻ chữ thường ngắn gọn"]}`,
+    messages: [{ role: 'user', text: `Nền tảng: ${meta.platform || platformOf(meta.url)}\nTiêu đề: ${meta.title || ''}\nKênh/Tác giả: ${meta.author || ''}\nMô tả: ${(meta.desc || '').slice(0, 500)}\nGhi chú: ${note}\nLink: ${meta.url}` }],
+  });
+  return { category: cats.includes(r.category) ? r.category : '', tags: (r.tags || []).map((t) => String(t).toLowerCase().trim()).filter(Boolean).slice(0, 3) };
 }
+const autoCat = () => S.cfg.aiReady && S.settings.linkAutoAI !== false;
 
 function openLinkEditor({ entry, url = '', note = '', title = '' } = {}) {
   const isNew = !entry || !S.entries.some((x) => x.id === entry.id);
   const e = structuredClone(entry || newEntry({ type: 'link', content: note, status: 'later' }));
   e.type = 'link';
   let meta = e.links[0] || (url ? { url, title } : null);
-  let auto = isNew && !!url && S.settings.linkAutoAI !== false && S.cfg.aiReady;
   openModal(`
     <div class="sheet-head"><h3>${isNew ? '📚 Lưu link' : '📚 Sửa link'}</h3><button class="icon-btn" id="leClose">✕</button></div>
     <div class="row gap"><input id="leUrl" placeholder="Dán link Facebook, YouTube, TikTok, bài báo…" value="${esc(meta?.url || '')}"><button class="btn ghost" id="leFetch">Lấy thông tin</button></div>
     <div id="lePrev"></div>
-    <div class="sum-box">
-      <div class="row gap"><h4 class="grow">✨ Link này nói gì</h4><button class="btn ghost sm" id="leAI">${e.summary ? 'Tóm tắt lại' : 'AI tóm tắt & phân loại'}</button></div>
-      <textarea id="leSum" rows="6" placeholder="Tóm tắt nội dung (AI viết hoặc tự ghi)">${esc(e.summary || '')}</textarea>
-      <p class="muted small" id="leConf"></p>
-    </div>
     <label class="lbl">Tiêu đề</label>
     <input id="leTitle" value="${esc(e.title || meta?.title || '')}" placeholder="Tiêu đề">
-    <label class="lbl">Phân loại</label>
-    <div class="chips le-cats" id="leCats"></div>
+    <label class="lbl">📝 Ghi chú — link này nói gì, vì sao bạn lưu</label>
+    <textarea id="leNote" rows="4" placeholder="Vd: Video giải thích lỗ đen, đoạn 5:30 hay nhất. Xem lại khi dạy con.">${esc(e.content || '')}</textarea>
+    <button class="btn ghost sm" id="leMic" style="margin-top:6px">🎙️ Nói</button>
+    <div class="row gap" style="margin-top:12px"><label class="lbl grow" style="margin:0">Phân loại</label><button class="btn ghost sm" id="leAI">✨ Gợi ý phân loại</button></div>
+    <div class="chips le-cats" id="leCats" style="margin-top:6px"></div>
     <label class="lbl">Trạng thái</label>
     <div class="chips le-status" id="leStatus">${Object.entries(STATUS).map(([k, [i, n]]) => `<button data-s="${k}">${i} ${n}</button>`).join('')}</div>
-    <label class="lbl">Ghi chú của tôi (vì sao lưu, cảm nghĩ, hoặc dán nội dung bài Facebook vào đây)</label>
-    <textarea id="leNote" rows="3">${esc(e.content || '')}</textarea>
-    <button class="btn ghost sm" id="leMic" style="margin-top:6px">🎙️ Nói</button>
     <label class="lbl">Thẻ</label>
-    <input id="leTags" value="${esc(e.tags.join(', '))}" placeholder="vd: vũ trụ, lỗ đen">
+    <input id="leTags" value="${esc(e.tags.join(', '))}" placeholder="vd: vũ trụ, dạy con">
     <label class="lbl">Ngày lưu</label>
     <input type="datetime-local" id="leDate" value="${esc(e.date)}" style="max-width:220px">
     <div class="sheet-foot">
@@ -821,17 +800,18 @@ function openLinkEditor({ entry, url = '', note = '', title = '' } = {}) {
   const sheet = $('#sheet');
   sheet.addEventListener('input', () => sheet.setAttribute('data-dirty', '1'));
   $('#leClose').onclick = () => { if (!sheet.hasAttribute('data-dirty') || confirm('Bỏ các thay đổi chưa lưu?')) closeModal(); };
+  let userPicked = !!e.category;
   const drawCats = () => {
     $('#leCats').innerHTML = allCats().map((c) => `<button data-c="${esc(c)}" class="${e.category === c ? 'on' : ''}">${catIcon(c)} ${esc(c)}</button>`).join('');
-    $$('#leCats button').forEach((b) => (b.onclick = () => { e.category = e.category === b.dataset.c ? '' : b.dataset.c; drawCats(); }));
+    $$('#leCats button').forEach((b) => (b.onclick = () => { e.category = e.category === b.dataset.c ? '' : b.dataset.c; userPicked = true; drawCats(); }));
+    $('#leCats .on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
   };
   const drawStatus = () => $$('#leStatus button').forEach((b) => {
     b.classList.toggle('on', e.status === b.dataset.s);
     b.onclick = () => { e.status = e.status === b.dataset.s ? '' : b.dataset.s; drawStatus(); };
   });
   const drawPrev = () => {
-    if (!meta?.url) return ($('#lePrev').innerHTML = '');
-    $('#lePrev').innerHTML = linkCard(meta) + (meta.author ? `<p class="muted small" style="margin:4px 0 0">Kênh / tác giả: ${esc(meta.author)}</p>` : '');
+    $('#lePrev').innerHTML = meta?.url ? linkCard(meta) + (meta.author ? `<p class="muted small" style="margin:4px 0 0">Kênh / tác giả: ${esc(meta.author)}</p>` : '') : '';
   };
   drawCats(); drawStatus(); drawPrev();
   $('#leMic').onclick = () => dictate($('#leNote'), $('#leMic'));
@@ -841,34 +821,29 @@ function openLinkEditor({ entry, url = '', note = '', title = '' } = {}) {
     if (!u) return;
     if (!/^https?:\/\//.test(u)) u = 'https://' + u;
     $('#leFetch').disabled = true; $('#leFetch').textContent = 'Đang lấy…';
+    const old = meta?.title || '';
     meta = await unfurl(u);
     meta.platform ||= platformOf(u);
     meta.src = u;
-    if (!$('#leTitle').value.trim() || $('#leTitle').value === (e.links[0]?.title || '')) $('#leTitle').value = meta.title || '';
+    if (!$('#leTitle').value.trim() || $('#leTitle').value === old) $('#leTitle').value = meta.title || '';
     $('#leFetch').disabled = false; $('#leFetch').textContent = 'Lấy thông tin';
     drawPrev();
   };
   $('#leFetch').onclick = fetchMeta;
   $('#leUrl').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); fetchMeta(); } });
 
-  const runAI = async () => {
-    if (!meta?.url) { await fetchMeta(); if (!meta?.url) return toast('Dán link trước đã'); }
-    const b = $('#leAI'); b.disabled = true;
-    b.textContent = meta.platform === 'youtube' ? '✨ Đang xem video…' : '✨ Đang đọc…';
-    $('#leConf').textContent = meta.platform === 'youtube' ? 'AI đang xem video — video dài có thể mất 30-60 giây.' : '';
+  const suggest = async (quiet) => {
+    if (!meta?.url) return quiet || toast('Dán link trước đã');
+    const b = $('#leAI'); b.disabled = true; b.textContent = '✨ Đang gợi ý…';
     try {
-      const r = await analyzeLink(meta, $('#leNote').value.trim());
-      if (r.summary) $('#leSum').value = r.summary;
-      if (r.title && (!$('#leTitle').value.trim() || $('#leTitle').value === meta.title)) $('#leTitle').value = r.title;
-      if (r.category) { e.category = r.category; drawCats(); }
+      const r = await suggestCategory({ ...meta, title: $('#leTitle').value || meta.title }, $('#leNote').value.trim());
+      if (r.category && (!userPicked || !quiet)) { e.category = r.category; drawCats(); }
       const cur = $('#leTags').value.split(',').map((x) => x.trim()).filter(Boolean);
-      $('#leTags').value = [...new Set([...cur, ...(r.tags || [])])].join(', ');
-      $('#leConf').textContent = r.confidence ? 'Độ tin cậy của tóm tắt: ' + r.confidence : '';
-      sheet.setAttribute('data-dirty', '1');
-    } catch (err) { $('#leConf').textContent = '⚠️ ' + err.message; }
-    b.disabled = false; b.textContent = 'Tóm tắt lại';
+      if (!cur.length || !quiet) $('#leTags').value = [...new Set([...cur, ...r.tags])].join(', ');
+    } catch (err) { if (!quiet) toast(err.message); }
+    if ($('#leAI')) { b.disabled = false; b.textContent = '✨ Gợi ý phân loại'; }
   };
-  $('#leAI').onclick = runAI;
+  $('#leAI').onclick = () => suggest(false);
 
   $('#leSave').onclick = async () => {
     const typed = $('#leUrl').value.trim();
@@ -876,7 +851,6 @@ function openLinkEditor({ entry, url = '', note = '', title = '' } = {}) {
     if (!meta?.url) return toast('Chưa có link');
     e.links = [meta, ...e.links.slice(1)];
     e.title = $('#leTitle').value.trim() || meta.title || '';
-    e.summary = $('#leSum').value.trim();
     e.content = $('#leNote').value;
     e.date = $('#leDate').value || localISO();
     e.tags = [...new Set($('#leTags').value.split(',').map((x) => x.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))];
@@ -890,30 +864,29 @@ function openLinkEditor({ entry, url = '', note = '', title = '' } = {}) {
   };
   (async () => {
     if (url && !e.links.length) await fetchMeta();
-    if (auto && !e.summary) runAI();
+    if (isNew && url && !e.category && autoCat()) suggest(true);
+    setTimeout(() => $('#leNote')?.focus(), 80);
   })();
 }
 
-// Lưu nhanh nhiều link (mỗi dòng một link), AI tóm tắt dần trong nền
+// Lưu nhanh (một hay nhiều link, mỗi dòng một link): lưu ngay, không mở hộp thoại
 async function quickSaveLinks(text) {
   const urls = [...new Set(text.match(URL_RE) || [])];
   if (!urls.length) return toast('Không thấy link nào');
-  if (urls.length === 1) return openLinkEditor({ url: urls[0], note: text.replace(URL_RE, '').trim() });
-  toast(`Đang lưu ${urls.length} link…`);
+  const note = urls.length === 1 ? text.replace(URL_RE, '').trim() : '';
+  let n = 0;
   for (const u of urls) {
     const meta = await unfurl(u);
     meta.platform ||= platformOf(u);
-    let e = newEntry({ type: 'link', title: meta.title, links: [meta], status: 'later' });
-    try {
-      if (S.cfg.aiReady && S.settings.linkAutoAI !== false) {
-        const r = await analyzeLink(meta);
-        Object.assign(e, { summary: r.summary || '', category: r.category || '', tags: r.tags || [], title: r.title || e.title });
-      }
-    } catch {}
+    const e = newEntry({ type: 'link', title: meta.title, links: [meta], status: 'later', content: note });
+    if (autoCat()) {
+      try { const r = await suggestCategory(meta, note); e.category = r.category; e.tags = r.tags; } catch {}
+    }
     await saveEntry(e);
+    n++;
     if (S.view === 'links') RENDER.links();
   }
-  toast(`Đã lưu ${urls.length} link ✓`);
+  toast(`Đã lưu ${n} link ✓ — bấm vào link để thêm ghi chú`, 3500);
 }
 
 function linkMatches(e) {
@@ -948,7 +921,7 @@ RENDER.links = function () {
   $('#linkShown').textContent = list.length !== all.length ? `Đang hiện ${list.length}/${all.length} link` : '';
   $('#linkGrid').innerHTML = list.length ? list.map((e) => {
     const l = e.links[0], p = l.platform || platformOf(l.url);
-    const sum = plain(e.summary || e.content || l.desc || '').replace(/Tóm tắt:?/i, '').trim();
+    const sum = plain(e.content || e.summary || l.desc || '').trim();
     return `<article class="lk" data-id="${e.id}">
       <div class="lk-thumb" ${l.image ? `style="background-image:url('${esc(l.image)}')"` : ''}>${l.image ? '' : catIcon(e.category)}
         <span class="lk-plat ${p}">${PLATS[p]}</span>${e.status ? `<span class="lk-status" title="${STATUS[e.status][1]}">${STATUS[e.status][0]}</span>` : ''}</div>
@@ -971,10 +944,10 @@ $('#linkAI').addEventListener('click', async () => {
   if (!list.length) return toast('Không có link nào để tổng hợp');
   const card = $('#linkAIcard'), out = $('#linkAIout');
   card.classList.remove('hidden'); out.classList.add('typing'); out.innerHTML = '';
-  const ctx = list.slice(0, 300).map((e) => `- [${e.date.slice(0, 10)}] (${e.category || 'chưa phân loại'}${e.status ? ', ' + STATUS[e.status][1] : ''}) ${e.title} — ${e.links[0].url}\n  Tóm tắt: ${plain(e.summary).slice(0, 600)}\n  Ghi chú: ${e.content.slice(0, 300)}`).join('\n');
+  const ctx = list.slice(0, 300).map((e) => `- [${e.date.slice(0, 10)}] (${e.category || 'chưa phân loại'}${e.status ? ', ' + STATUS[e.status][1] : ''}) ${e.title}${e.links[0].author ? ' — ' + e.links[0].author : ''} — ${e.links[0].url}${e.content ? '\n  Ghi chú: ' + e.content.slice(0, 400) : ''}`).join('\n');
   try {
     await aiStream({
-      system: systemPrompt() + '\nNhiệm vụ: tổng hợp KHO LINK người dùng đã lưu thành một bản ghi nhớ kiến thức. Gồm: ## Bức tranh chung (người dùng đang quan tâm gì), ## Kiến thức chính theo chủ đề (mỗi chủ đề 2-5 ý, dẫn tên link), ## Các ý trùng lặp hoặc mâu thuẫn giữa các nguồn, ## Nên xem lại trước (3-5 link, vì sao), ## Gợi ý tìm hiểu tiếp.',
+      system: systemPrompt() + '\nNhiệm vụ: điểm lại KHO LINK người dùng đã lưu (dựa trên tiêu đề, chủ đề và ghi chú của họ — không có nội dung chi tiết của link, đừng bịa). Gồm: ## Bạn đang quan tâm gì (theo chủ đề), ## Link đang chờ xem nên ưu tiên, ## Những ghi chú đáng chú ý, ## Gợi ý sắp xếp lại kho link.',
       messages: [{ role: 'user', text: `Bộ lọc: ${linkFilter.cat || 'mọi chủ đề'}, ${linkFilter.plat || 'mọi nguồn'}${linkFilter.q ? ', từ khoá ' + linkFilter.q : ''}.\n\nDANH SÁCH LINK:\n${ctx}` }],
       onText: (t) => (out.innerHTML = md(t)),
     });

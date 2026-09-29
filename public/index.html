@@ -75,20 +75,20 @@
     <!-- KHO LINK -->
     <section id="v-links" class="view">
       <header class="vhead">
-        <div><h2>Kho link</h2><p class="muted" id="linkCount">Lưu link Facebook, YouTube, bài báo… kèm tóm tắt và phân loại.</p></div>
+        <div><h2>Kho link</h2><p class="muted" id="linkCount">Lưu link Facebook, YouTube, bài báo… kèm ghi chú và phân loại.</p></div>
         <button class="btn primary" id="linkAdd">＋ Thêm link</button>
       </header>
       <div class="card capture">
         <div class="row gap"><input id="linkQuick" placeholder="Dán link vào đây rồi Enter (có thể dán nhiều link, mỗi dòng một link)"><button class="btn primary" id="linkQuickBtn">Lưu</button></div>
       </div>
       <div class="filters">
-        <input type="search" id="linkSearch" placeholder="Tìm theo tiêu đề, tóm tắt, ghi chú, kênh…">
+        <input type="search" id="linkSearch" placeholder="Tìm theo tiêu đề, ghi chú, chủ đề, kênh…">
         <div class="chips" id="linkCats"></div>
         <div class="chips" id="linkPlat"></div>
       </div>
       <div class="row gap wrap" style="margin:6px 0 12px">
         <span class="muted small" id="linkShown"></span><span class="grow"></span>
-        <button class="btn ghost sm" id="linkAI">✨ AI tổng hợp các link đang lọc</button>
+        <button class="btn ghost sm" id="linkAI">✨ AI điểm lại các link đang lọc</button>
       </div>
       <div class="card hidden" id="linkAIcard"><div class="md" id="linkAIout"></div></div>
       <div id="linkGrid" class="link-grid"></div>
@@ -170,7 +170,7 @@
         <b>iPhone:</b> trong Facebook/YouTube chọn <i>Sao chép liên kết</i> rồi dán vào ô ở tab Kho link.<br>
         <b>Máy tính:</b> kéo nút dưới đây lên thanh dấu trang; khi đang xem trang nào, bấm nó để lưu trang đó.</p>
         <a class="btn ghost" id="bookmarklet" href="#">📚 Lưu vào Nhật Ký</a>
-        <label class="check"><input type="checkbox" id="linkAutoAI"> Tự động để AI tóm tắt & phân loại khi thêm link</label>
+        <label class="check"><input type="checkbox" id="linkAutoAI"> Tự động gợi ý phân loại khi thêm link (AI chỉ đọc tiêu đề)</label>
         <label class="lbl">Chủ đề riêng của bạn (thêm vào danh sách phân loại, cách nhau bằng dấu phẩy)</label>
         <input id="linkCustomCats" placeholder="vd: Chứng khoán, Nuôi dạy con, Làm vườn">
       </div>
