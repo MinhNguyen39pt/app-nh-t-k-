@@ -93,7 +93,7 @@ const S = {
   entries: [],
   cfg: {},
   settings: { theme: 'auto', model: '', userName: '', clientId: '', driveAuto: false },
-  filter: { q: '', type: '', tag: '' },
+  filter: { q: '', type: '', tag: '', day: '', all: false },
   view: 'timeline',
   tuvi: {},
   folders: [],
@@ -265,7 +265,7 @@ const newEntry = (over = {}) => ({
 });
 
 // ============ Dòng thời gian ============
-// ============ Trang chủ thân thiện ============
+// ============ Trang Nhật ký: chỉ dành cho viết & cảm xúc ============
 const TYPE_COLORS = { nhatky: '#d9774f', baihoc: '#d99a1e', ghichu: '#4f7fd9', link: '#8a5cd6', diadiem: '#17a673', ytuong: '#d94f8f', muctieu: '#d64545' };
 const PROMPTS_DAY = [
   'Điều gì hôm nay khiến bạn mỉm cười?', 'Một việc nhỏ bạn làm tốt hôm nay là gì?', 'Hôm nay bạn học được điều gì mới?',
@@ -277,45 +277,75 @@ const PROMPTS_DAY = [
   'Hôm nay có điều gì làm bạn bất ngờ?', 'Nếu hôm nay là một bài hát, đó sẽ là bài gì?', 'Bạn đã dành thời gian cho ai?',
   'Một sai lầm và bài học rút ra?', 'Điều gì giúp bạn nạp lại năng lượng?', 'Ước mơ lớn nhất lúc này của bạn?',
   'Một điều bạn muốn học trong tháng này?', 'Bạn đã nói "không" với điều gì? Có đúng không?', 'Kỷ niệm tuổi thơ nào chợt nhớ gần đây?',
-  'Bạn đánh giá hôm nay mấy điểm / 10? Vì sao?', 'Tin nhắn nào làm bạn vui gần đây?', 'Điều gì bạn muốn nhớ mãi về giai đoạn này?',
+  'Bạn chấm hôm nay mấy điểm trên 10? Vì sao?', 'Tin nhắn nào làm bạn vui gần đây?', 'Điều gì bạn muốn nhớ mãi về giai đoạn này?',
 ];
 let promptShift = 0;
 const dayOfYear = () => Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 864e5);
+const TH = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+const longDate = (iso) => { const d = parseDate(iso); return `${TH[d.getDay()]}, ${d.getDate()} tháng ${d.getMonth() + 1}`; };
+const isNoise = (e) => e.type === 'link' || e.tags.includes('ai') || e.tags.includes('tử vi');
+const moodOfDay = (k) => { const ms = S.entries.filter((e) => e.mood && dayKey(e.date) === k).map((e) => e.mood); return ms.length ? Math.round(ms.reduce((a, b) => a + b) / ms.length) : 0; };
+S.quickMood = 0;
+
+function weekRing(n) {
+  const r = 20, c = 2 * Math.PI * r, f = Math.min(1, n / 7);
+  return `<svg viewBox="0 0 52 52" class="ring"><circle cx="26" cy="26" r="${r}" class="ring-bg"/><circle cx="26" cy="26" r="${r}" class="ring-fg" stroke-dasharray="${c * f} ${c}" transform="rotate(-90 26 26)"/><text x="26" y="30" text-anchor="middle">${n}/7</text></svg>`;
+}
 
 function renderHome() {
   const now = localISO(), today = dayKey(now), l = lun(now);
   const h = new Date().getHours();
   const g = h < 5 ? 'Khuya rồi' : h < 11 ? 'Chào buổi sáng' : h < 14 ? 'Chào buổi trưa' : h < 18 ? 'Chào buổi chiều' : 'Chào buổi tối';
   const icon = h < 5 ? '🌙' : h < 11 ? '🌤️' : h < 14 ? '☀️' : h < 18 ? '🌇' : '🌙';
-  const todays = S.entries.filter((e) => dayKey(e.date) === today);
-  const moodToday = todays.find((e) => e.mood)?.mood;
+  const todays = S.entries.filter((e) => dayKey(e.date) === today && !isNoise(e));
   const st = streak();
+  // Số ngày đã viết trong tuần (T2 → CN)
+  const d0 = new Date(); d0.setDate(d0.getDate() - ((d0.getDay() + 6) % 7));
+  const days = new Set(S.entries.filter((e) => !isNoise(e)).map((e) => dayKey(e.date)));
+  let wk = 0; for (let i = 0; i < 7; i++) { const d = new Date(d0); d.setDate(d0.getDate() + i); if (days.has(dayKey(localISO(d)))) wk++; }
+  const msg = todays.length ? `Hôm nay bạn đã viết ${todays.length} trang. Tuyệt lắm! ✨` : st ? `Viết một dòng để giữ chuỗi ${st} ngày nhé 🔥` : 'Một dòng nhỏ mỗi ngày — bắt đầu thôi 🌱';
   $('#hero').innerHTML = `
     <div class="hero-top">
       <div><div class="hero-hi">${icon} ${g}${S.settings.userName ? ', ' + esc(S.settings.userName) : ''}</div>
-      <div class="hero-date">${fmtDate(now)} · 🌙 âm ${l.text} ${l.yearCC}</div></div>
-      <div class="streak ${st ? 'on' : ''}" title="Số ngày viết liên tiếp"><span class="fire">🔥</span><b>${st}</b><small>ngày</small></div>
-    </div>
-    <div class="hero-q">${moodToday ? `Hôm nay bạn đang <b>${MOOD_NAMES[moodToday].toLowerCase()}</b> ${MOODS[moodToday]} · đã ghi ${todays.length} mục` : todays.length ? `Hôm nay đã ghi ${todays.length} mục — bạn thấy thế nào?` : 'Hôm nay bạn thấy thế nào?'}</div>
-    <div class="mood-pick">${[5, 4, 3, 2, 1].map((m) => `<button data-mood="${m}" class="${moodToday === m ? 'on' : ''}"><span>${MOODS[m]}</span><small>${MOOD_NAMES[m]}</small></button>`).join('')}</div>`;
-  $$('#hero [data-mood]').forEach((b) => (b.onclick = () => openEditor(newEntry({ mood: +b.dataset.mood }), { focus: true })));
+      <div class="hero-date">${msg}</div></div>
+      <div class="hero-badges">
+        <div class="streak ${st ? 'on' : ''}" title="Số ngày viết liên tiếp"><span class="fire">🔥</span><b>${st}</b><small>ngày liền</small></div>
+        <div class="week" title="Số ngày đã viết trong tuần này">${weekRing(wk)}<small>tuần này</small></div>
+      </div>
+    </div>`;
 
-  const TILES = [
-    ['✍️', 'Viết', () => openEditor()], ['🎙️', 'Nói', () => openEditor(null, { mic: true })], ['📷', 'Ảnh', () => openEditor(null, { photo: true })],
-    ['📍', 'Check-in', () => openEditor(newEntry({ type: 'diadiem' }), { locate: true })], ['💡', 'Bài học', () => openEditor(newEntry({ type: 'baihoc', content: TEMPLATES.baihoc }))],
-    ['🔗', 'Lưu link', () => { go('links'); openLinkEditor(); }], ['🎵', 'Nghe nhạc', () => go('music')], ['✨', 'Hỏi AI', () => go('assistant')],
-  ];
-  $('#tiles').innerHTML = TILES.map(([i, t], k) => `<button class="tile" data-k="${k}" style="--i:${k}"><span>${i}</span>${t}</button>`).join('');
-  $$('#tiles .tile').forEach((b) => (b.onclick = () => TILES[+b.dataset.k][2]()));
-
-  const p = PROMPTS_DAY[(dayOfYear() + promptShift) % PROMPTS_DAY.length];
-  $('#promptCard').innerHTML = S.filter.q ? '' : `<div class="card prompt-card"><div class="pc-label">💭 Gợi ý viết hôm nay</div><div class="pc-q">${esc(p)}</div>
-    <div class="row gap"><button class="btn primary sm" id="pcWrite">✍️ Viết về điều này</button><button class="btn ghost sm" id="pcNext">🔄 Câu khác</button></div></div>`;
-  if ($('#pcWrite')) {
-    $('#pcWrite').onclick = () => openEditor(newEntry({ title: p }), { focus: true });
-    $('#pcNext').onclick = () => { promptShift++; renderHome(); };
+  // Dải tâm trạng 14 ngày
+  let strip = '';
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const k = dayKey(localISO(d)), m = moodOfDay(k), has = days.has(k);
+    strip += `<button class="ms-day ${k === today ? 'today' : ''} ${S.filter.day === k ? 'on' : ''}" data-day="${k}" title="${fmtDate(k)}">
+      <span class="ms-e">${m ? MOODS[m] : has ? '📝' : '·'}</span><small>${i === 0 ? 'nay' : WD[d.getDay()]}</small><small class="ms-n">${d.getDate()}</small></button>`;
   }
+  $('#moodStrip').innerHTML = `<div class="ms-title">🌈 Tâm trạng 2 tuần qua <span class="muted small">— chạm một ngày để đọc lại</span></div><div class="ms-row">${strip}</div>`;
+  const msr = $('#moodStrip .ms-row'); msr.scrollLeft = msr.scrollWidth;
+  $$('#moodStrip [data-day]').forEach((b) => (b.onclick = () => { S.filter.day = S.filter.day === b.dataset.day ? '' : b.dataset.day; RENDER.timeline(); if (S.filter.day) $('#timeline').scrollIntoView({ behavior: 'smooth' }); }));
+
+  // Trang viết hôm nay
+  const p = PROMPTS_DAY[(dayOfYear() + promptShift) % PROMPTS_DAY.length];
+  $('#dpDate').textContent = longDate(now);
+  $('#dpLunar').textContent = `🌙 ${l.text} âm lịch`;
+  $('#dpPrompt').textContent = '💭 ' + p;
+  $('#quick').placeholder = 'Viết vài dòng thôi cũng được… hôm nay có gì vui, buồn, đáng nhớ?';
+  $('#dpMood').innerHTML = `<span class="muted small">Cảm xúc:</span>` + [5, 4, 3, 2, 1].map((m) => `<button data-mood="${m}" class="${S.quickMood === m ? 'on' : ''}" title="${MOOD_NAMES[m]}">${MOODS[m]}</button>`).join('');
+  $$('#dpMood [data-mood]').forEach((b) => (b.onclick = () => { S.quickMood = S.quickMood === +b.dataset.mood ? 0 : +b.dataset.mood; renderHome(); $('#quick').focus(); }));
 }
+$('#dpNext').addEventListener('click', () => { promptShift++; renderHome(); });
+// Chuyển nội dung đang viết sang trình soạn đầy đủ
+const composerToEditor = (over = {}, opts = {}) => {
+  const e = newEntry({ content: $('#quick').value, mood: S.quickMood, ...over });
+  $('#quick').value = ''; S.quickMood = 0;
+  openEditor(e, opts);
+};
+$('#quickDraw').addEventListener('click', () => composerToEditor({}, { draw: true }));
+$('#quickPhoto').addEventListener('click', () => composerToEditor({}, { photo: true }));
+$('#quickPlace').addEventListener('click', () => composerToEditor({}, { locate: true }));
+$('#quickLesson').addEventListener('click', () => composerToEditor({ type: 'baihoc', content: $('#quick').value || TEMPLATES.baihoc }, { focus: true }));
 
 // Hiệu ứng mừng khi giữ chuỗi ngày viết
 function celebrate(n) {
@@ -344,27 +374,24 @@ function streak() {
 }
 
 function entryCard(e) {
-  const d = parseDate(e.date);
   const t = TYPES[e.type] || TYPES.ghichu;
-  const thumbs = e.photos.slice(0, 5).map((p) => `<img loading="lazy" src="${photoUrl(p, 1)}" alt="">`).join('');
-  const more = e.photos.length > 5 ? `<span class="muted small">+${e.photos.length - 5}</span>` : '';
-  const excerpt = plain(e.content).slice(0, 280);
+  const thumbs = e.photos.slice(0, 4).map((p) => `<img loading="lazy" src="${photoUrl(p, 1)}" alt="" class="${p.sketch ? 'sk' : ''}">`).join('');
+  const more = e.photos.length > 4 ? `<span class="muted small">+${e.photos.length - 4}</span>` : '';
+  const excerpt = plain(e.content).slice(0, 320);
+  const kids = childrenOf(e.id).length;
   return `<article class="entry" data-id="${e.id}" style="--tc:${TYPE_COLORS[e.type] || '#888'}">
-    <div class="e-date"><b>${d.getDate()}</b><span>${WD[d.getDay()]} · ${fmtTime(e.date) || ''}</span><span class="lunar" title="Âm lịch">âm ${lun(e.date).text}</span><span class="e-type" title="${t.name}">${t.icon}</span></div>
+    <div class="e-side"><span class="e-big" title="${e.mood ? MOOD_NAMES[e.mood] : t.name}">${e.mood ? MOODS[e.mood] : t.icon}</span><span class="e-time">${fmtTime(e.date) || ''}</span></div>
     <div class="e-body">
-      ${e.title ? `<div class="e-title">${esc(e.title)}</div>` : ''}
+      ${e.title ? `<div class="e-title">${e.type !== 'nhatky' ? `<span class="e-kind">${t.icon} ${t.name}</span> ` : ''}${esc(e.title)}</div>` : e.type !== 'nhatky' ? `<div class="e-kind">${t.icon} ${t.name}</div>` : ''}
       ${excerpt ? `<div class="e-excerpt">${esc(excerpt)}</div>` : ''}
       ${thumbs ? `<div class="thumbs">${thumbs}${more}</div>` : ''}
       ${!excerpt && e.links[0] ? `<div class="e-excerpt">🔗 ${esc(e.links[0].title || e.links[0].url)}</div>` : ''}
       <div class="e-meta">
-        ${e.mood ? `<span title="${MOOD_NAMES[e.mood]}">${MOODS[e.mood]}</span>` : ''}
-        ${e.category ? `<span class="cat">${catIcon(e.category)} ${esc(e.category)}</span>` : ''}
         ${e.folderId && folderById(e.folderId) ? `<span class="cat">📁 ${esc(folderById(e.folderId).name)}</span>` : ''}
         ${e.parentId && entryExists(e.parentId) ? `<span>↳ ${esc((S.entries.find((x) => x.id === e.parentId).title || 'mục mẹ').slice(0, 30))}</span>` : ''}
-        ${childrenOf(e.id).length ? `<span>🧩 ${childrenOf(e.id).length} mục con</span>` : ''}
+        ${kids ? `<span>🧩 ${kids} mục con</span>` : ''}
         ${e.music ? `<span>🎵 ${esc(e.music.name.slice(0, 30))}</span>` : ''}
         ${e.location ? `<span>📍 ${esc(shortPlace(e.location.name))}</span>` : ''}
-        ${e.links.length ? `<span>🔗 ${e.links.length}</span>` : ''}
         ${e.tags.map((x) => `<span class="tag">#${esc(x)}</span>`).join('')}
       </div>
     </div></article>`;
@@ -372,9 +399,11 @@ function entryCard(e) {
 const shortPlace = (n = '') => n.split(',').slice(0, 2).join(',').trim();
 
 function filtered() {
-  const { q, type, tag } = S.filter;
+  const { q, type, tag, day, all } = S.filter;
   const qs = q.toLowerCase().normalize('NFC').trim();
   return S.entries.filter((e) => {
+    if (!all && isNoise(e)) return false;
+    if (day && dayKey(e.date) !== day) return false;
     if (type && e.type !== type) return false;
     if (tag && !e.tags.includes(tag)) return false;
     if (qs) {
@@ -385,47 +414,87 @@ function filtered() {
   });
 }
 
+// Cột phụ (máy tính): số liệu nhanh + thẻ hay dùng
+function renderSide() {
+  const box = $('#sideStats'); if (!box) return;
+  const J = S.entries.filter((e) => !isNoise(e));
+  const mo = localISO().slice(0, 7);
+  const thisMonth = J.filter((e) => e.date.slice(0, 7) === mo);
+  const words = thisMonth.reduce((n, e) => n + (e.content.trim() ? e.content.trim().split(/\s+/).length : 0), 0);
+  const ms = thisMonth.filter((e) => e.mood).map((e) => e.mood);
+  const avg = ms.length ? ms.reduce((a, b) => a + b) / ms.length : 0;
+  const tags = {}; J.forEach((e) => e.tags.forEach((t) => (tags[t] = (tags[t] || 0) + 1)));
+  const top = Object.entries(tags).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  box.innerHTML = `<div class="ss-title">📊 Tháng ${+mo.slice(5)} của bạn</div>
+    <div class="ss-grid"><div><b>${thisMonth.length}</b><small>trang</small></div><div><b>${words.toLocaleString('vi-VN')}</b><small>chữ</small></div>
+      <div><b>${thisMonth.reduce((n, e) => n + e.photos.length, 0)}</b><small>ảnh</small></div><div><b>${avg ? MOODS[Math.round(avg)] : '—'}</b><small>cảm xúc TB</small></div></div>
+    ${top.length ? `<div class="ss-title" style="margin-top:12px">🏷️ Chủ đề hay viết</div><div class="chips">${top.map(([t, n]) => `<button data-tag="${esc(t)}" class="${S.filter.tag === t ? 'on' : ''}">#${esc(t)} <span class="n">${n}</span></button>`).join('')}</div>` : ''}
+    <div class="row gap wrap" style="margin-top:12px"><button class="btn ghost sm" data-go="stats">Xem thống kê</button><button class="btn ghost sm" data-go="assistant">✨ Hỏi trợ lý</button></div>`;
+  $$('#sideStats [data-tag]').forEach((b) => (b.onclick = () => { S.filter.tag = S.filter.tag === b.dataset.tag ? '' : b.dataset.tag; RENDER.timeline(); }));
+  $$('#sideStats [data-go]').forEach((b) => (b.onclick = () => go(b.dataset.go)));
+}
+
 RENDER.timeline = function () {
   renderHome();
-  // Bộ lọc loại
+  renderSide();
+  const JT = Object.entries(TYPES).filter(([k]) => k !== 'link');
   $('#typeChips').innerHTML = `<button data-t="" class="${!S.filter.type ? 'on' : ''}">Tất cả</button>` +
-    Object.entries(TYPES).map(([k, t]) => `<button data-t="${k}" style="--tc:${TYPE_COLORS[k]}" class="tchip ${S.filter.type === k ? 'on' : ''}">${t.icon} ${t.name}</button>`).join('');
-  $$('#typeChips button').forEach((b) => (b.onclick = () => { S.filter.type = b.dataset.t; RENDER.timeline(); }));
+    JT.map(([k, t]) => `<button data-t="${k}" style="--tc:${TYPE_COLORS[k]}" class="tchip ${S.filter.type === k ? 'on' : ''}">${t.icon} ${t.name}</button>`).join('') +
+    `<button data-all="1" class="${S.filter.all ? 'on' : ''}" title="Hiện cả link đã lưu và ghi chú do AI tạo">🗂️ Cả link & ghi chú AI</button>`;
+  $$('#typeChips [data-t]').forEach((b) => (b.onclick = () => { S.filter.type = b.dataset.t; RENDER.timeline(); }));
+  $('#typeChips [data-all]').onclick = () => { S.filter.all = !S.filter.all; RENDER.timeline(); };
   $('#tagFilter').innerHTML = '<option value="">Tất cả thẻ</option>' + allTags().map(([t, n]) => `<option value="${esc(t)}" ${S.filter.tag === t ? 'selected' : ''}>#${esc(t)} (${n})</option>`).join('');
 
-  // Ngày này năm xưa
+  // Ngày này năm xưa + một kỷ niệm ngẫu nhiên
   const md_ = localISO().slice(5, 10), yr = new Date().getFullYear();
   const tl = lun(localISO());
   const otd = S.entries.filter((e) => {
+    if (isNoise(e)) return false;
     if (+e.date.slice(0, 4) >= yr && lun(e.date).year >= tl.year) return false;
     if (e.date.slice(5, 10) === md_ && +e.date.slice(0, 4) < yr) return true;
     const l = lun(e.date);
     return l.day === tl.day && l.month === tl.month && l.year < tl.year;
   });
   const otdTag = (e) => (e.date.slice(5, 10) === md_ ? `${yr - +e.date.slice(0, 4)} năm trước` : `${tl.year - lun(e.date).year} năm trước (âm lịch)`);
-  $('#onThisDay').innerHTML = (S.filter.q ? '' : todayCard()) + (otd.length && !S.filter.q ? `<div class="card otd"><h3>🕰️ Ngày này năm xưa</h3>${otd.map((e) =>
-    `<div class="item" data-id="${e.id}"><b>${otdTag(e)}</b> · ${TYPES[e.type]?.icon || ''} ${esc(e.title || plain(e.content).slice(0, 80))}</div>`).join('')}</div>` : '');
+  const old = S.entries.filter((e) => !isNoise(e) && Date.now() - parseDate(e.date) > 7 * 864e5 && (e.content.length > 30 || e.photos.length));
+  const mem = old.length ? old[(dayOfYear() * 7919) % old.length] : null;
+  const busy = S.filter.q || S.filter.day;
+  $('#onThisDay').innerHTML = busy ? '' :
+    (otd.length ? `<div class="card otd"><h3>🕰️ Ngày này năm xưa</h3>${otd.map((e) => `<div class="item" data-id="${e.id}"><b>${otdTag(e)}</b> · ${MOODS[e.mood] || TYPES[e.type]?.icon || ''} ${esc(e.title || plain(e.content).slice(0, 80))}</div>`).join('')}</div>` : '') +
+    (mem ? `<div class="card memory item" data-id="${mem.id}"><div class="pc-label">💌 Nhớ lại</div><div class="mem-date">${longDate(mem.date)}, ${mem.date.slice(0, 4)}</div>
+      ${mem.photos[0] ? `<img src="${photoUrl(mem.photos[0], 1)}" alt="" class="mem-img">` : ''}<div class="mem-text">${esc((mem.title ? mem.title + ' — ' : '') + plain(mem.content).slice(0, 200))}</div></div>` : '');
 
-  $('#viewMode').innerHTML = `<button data-v="date" class="${S.settings.viewMode !== 'folder' ? 'on' : ''}">📅 Theo ngày</button><button data-v="folder" class="${S.settings.viewMode === 'folder' ? 'on' : ''}">📁 Theo thư mục</button>`;
-  $$('#viewMode button').forEach((b) => (b.onclick = () => { S.settings.viewMode = b.dataset.v; saveSettings(); RENDER.timeline(); }));
+  $('#viewMode').innerHTML = `<button data-v="date" class="${S.settings.viewMode !== 'folder' ? 'on' : ''}">📅 Theo ngày</button><button data-v="folder" class="${S.settings.viewMode === 'folder' ? 'on' : ''}">📁 Theo thư mục</button>` +
+    (S.filter.day ? `<button class="on" id="dayClear">📆 ${fmtDate(S.filter.day)} ✕</button>` : '');
+  $$('#viewMode [data-v]').forEach((b) => (b.onclick = () => { S.settings.viewMode = b.dataset.v; saveSettings(); RENDER.timeline(); }));
+  if ($('#dayClear')) $('#dayClear').onclick = () => { S.filter.day = ''; RENDER.timeline(); };
   const list = filtered();
   if (S.settings.viewMode === 'folder') return renderFolderView(list);
   if (!list.length) {
-    $('#timeline').innerHTML = S.entries.length
-      ? '<div class="empty"><b>🔍</b>Không tìm thấy mục nào.</div>'
-      : '<div class="empty"><b>🌱</b>Trang nhật ký còn trống.<br>Viết dòng đầu tiên ở ô bên trên, hoặc bấm nút ＋.</div>';
+    $('#timeline').innerHTML = S.entries.some((e) => !isNoise(e))
+      ? `<div class="empty"><b>🔍</b>${S.filter.day ? 'Ngày này bạn chưa viết gì.' : 'Không tìm thấy trang nào.'}</div>`
+      : '<div class="empty"><b>🌱</b>Cuốn sổ còn trống.<br>Viết trang đầu tiên ở phía trên nhé.</div>';
     return;
   }
+  // Nhóm theo ngày như những trang sổ
+  const todayK = dayKey(localISO()), y = new Date(); y.setDate(y.getDate() - 1); const yK = dayKey(localISO(y));
   let html = '', cur = '';
-  for (const e of list.slice(0, 400)) {
-    const m = e.date.slice(0, 7);
-    if (m !== cur) { cur = m; html += `<div class="month-h">Tháng ${+m.slice(5)} / ${m.slice(0, 4)}</div>`; }
+  for (const e of list.slice(0, 300)) {
+    const k = dayKey(e.date);
+    if (k !== cur) {
+      if (cur) html += '</div>';
+      cur = k;
+      const l = lun(e.date), m = moodOfDay(k);
+      html += `<div class="day-group"><div class="day-h"><span class="day-name">${k === todayK ? 'Hôm nay' : k === yK ? 'Hôm qua' : longDate(e.date)}</span>
+        <span class="day-sub">${k === todayK || k === yK ? longDate(e.date) + ' · ' : ''}${e.date.slice(0, 4) !== String(new Date().getFullYear()) ? e.date.slice(0, 4) + ' · ' : ''}âm ${l.text}${m ? ' · ' + MOODS[m] : ''}</span></div>`;
+    }
     html += entryCard(e);
   }
-  if (list.length > 400) html += `<p class="muted small">Đang hiện 400/${list.length} mục. Dùng ô tìm kiếm để lọc.</p>`;
+  html += '</div>';
+  if (list.length > 300) html += `<p class="muted small">Đang hiện 300/${list.length} trang. Dùng ô tìm kiếm để lọc.</p>`;
   $('#timeline').innerHTML = html;
 };
-$('#onThisDay').addEventListener('click', (ev) => { const a = ev.target.closest('.item'); if (a) openViewer(a.dataset.id); });
+$('#onThisDay').addEventListener('click', (ev) => { const a = ev.target.closest('.item[data-id]'); if (a) openViewer(a.dataset.id); });
 $('#search').addEventListener('input', debounce((ev) => { S.filter.q = ev.target.value; RENDER.timeline(); }, 200));
 $('#tagFilter').addEventListener('change', (ev) => { S.filter.tag = ev.target.value; RENDER.timeline(); });
 
@@ -433,16 +502,16 @@ $('#tagFilter').addEventListener('change', (ev) => { S.filter.tag = ev.target.va
 const URL_RE = /https?:\/\/[^\s<>"]+/g;
 $('#quickSave').addEventListener('click', async () => {
   const text = $('#quick').value.trim();
-  if (!text) return $('#quick').focus();
+  if (!text && !S.quickMood) { $('#quick').focus(); return toast('Viết vài dòng hoặc chọn một cảm xúc nhé'); }
   const urls = text.match(URL_RE) || [];
   if (urls.length && text.replace(URL_RE, '').trim().length < 20) { $('#quick').value = ''; return quickSaveLinks(text); }
-  const e = newEntry({ type: 'nhatky', content: text });
+  const e = newEntry({ type: 'nhatky', content: text || `Cảm thấy ${MOOD_NAMES[S.quickMood].toLowerCase()} ${MOODS[S.quickMood]}`, mood: S.quickMood });
   $('#quickSave').disabled = true;
   try {
     e.links = await Promise.all(urls.slice(0, 5).map(unfurl));
     await saveEntry(e);
-    $('#quick').value = '';
-    toast('Đã lưu ✓');
+    $('#quick').value = ''; S.quickMood = 0;
+    toast('Đã lưu trang nhật ký ✓');
     RENDER.timeline();
   } catch (err) { toast(err.message); }
   $('#quickSave').disabled = false;
@@ -600,6 +669,181 @@ function currentPosition() {
   });
 }
 
+// ============ Trang viết tay (bút cảm ứng / Apple Pencil / ngón tay / chuột) ============
+const SK_COLORS = ['#1f1f1f', '#2f5bd3', '#d23b3b', '#1f9d55', '#e08a00', '#8a4fd6', '#d9457f', '#7a5230'];
+const SK_BGS = [['lines', '📄 Kẻ dòng'], ['grid', '▦ Ô vuông'], ['dots', '⋯ Chấm'], ['blank', '⬜ Trơn']];
+function openSketch({ data = null, onSave, onText } = {}) {
+  const W = Math.min(window.innerWidth, 1400);
+  const scale = data ? W / data.w : 1;
+  const st = {
+    tool: 'pen', color: SK_COLORS[0], size: 3, bg: data?.bg || 'lines', penOnly: false, sawPen: false,
+    strokes: (data?.strokes || []).map((s) => ({ ...s, w: s.w * scale, p: s.p.map(([x, y, pr]) => [x * scale, y * scale, pr]) })),
+    undo: [], redo: [], cur: null, H: Math.max(window.innerHeight - 70, data ? data.h * scale : 0), dirty: false,
+  };
+  const wrap = document.createElement('div');
+  wrap.className = 'sketch';
+  wrap.innerHTML = `
+    <div class="sk-bar">
+      <button class="sk-b" data-act="close" title="Đóng">✕</button>
+      <div class="sk-grp">${[['pen', '🖊️', 'Bút'], ['hl', '🖍️', 'Bút dạ quang'], ['eraser', '🧽', 'Tẩy']].map(([k, i, t]) => `<button class="sk-b ${k === 'pen' ? 'on' : ''}" data-tool="${k}" title="${t}">${i}</button>`).join('')}</div>
+      <div class="sk-grp sk-colors">${SK_COLORS.map((c, i) => `<button class="sk-c ${i === 0 ? 'on' : ''}" data-color="${c}" style="--c:${c}" title="${c}"></button>`).join('')}<label class="sk-c sk-custom" title="Màu khác"><input type="color" value="#2f5bd3"></label></div>
+      <div class="sk-grp">${[[2, 'Nét mảnh'], [3, 'Nét vừa'], [6, 'Nét đậm'], [10, 'Rất đậm']].map(([v, t]) => `<button class="sk-b sk-size ${v === 3 ? 'on' : ''}" data-size="${v}" title="${t}"><i style="--s:${v + 2}px"></i></button>`).join('')}</div>
+      <div class="sk-grp">
+        <button class="sk-b" data-act="undo" title="Hoàn tác">↶</button><button class="sk-b" data-act="redo" title="Làm lại">↷</button>
+        <button class="sk-b" data-act="bg" title="Đổi nền giấy">📄</button>
+        <button class="sk-b" data-act="pen" title="Chỉ nhận bút (chống chạm lòng bàn tay) — ngón tay dùng để cuộn">✋</button>
+        <button class="sk-b" data-act="page" title="Thêm trang">＋📃</button>
+        <button class="sk-b" data-act="clear" title="Xoá hết">🗑</button>
+      </div>
+      <span class="grow"></span>
+      <button class="btn ghost sm" data-act="ocr" title="AI đọc chữ viết tay thành văn bản">🔤 Đọc chữ</button>
+      <button class="btn primary sm" data-act="save">Lưu</button>
+    </div>
+    <div class="sk-hint" id="skHint">Viết bằng bút, ngón tay hoặc chuột. Trên iPad, nét bút đậm/nhạt theo lực nhấn Apple Pencil.</div>
+    <div class="sk-scroll"><div class="sk-paper"><canvas class="sk-base"></canvas><canvas class="sk-live"></canvas></div></div>
+    <div class="sk-ocr hidden"><div class="row gap"><b class="grow">🔤 Chữ AI đọc được</b><button class="icon-btn" data-act="ocrx">✕</button></div>
+      <textarea rows="5"></textarea><div class="row gap"><button class="btn primary sm" data-act="ocrins">Chèn vào nhật ký</button><span class="muted small">Bạn có thể sửa trước khi chèn.</span></div></div>`;
+  document.body.appendChild(wrap);
+  document.body.style.overflow = 'hidden';
+  const base = wrap.querySelector('.sk-base'), live = wrap.querySelector('.sk-live'), paper = wrap.querySelector('.sk-paper'), scroller = wrap.querySelector('.sk-scroll');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const bx = base.getContext('2d'), lx = live.getContext('2d');
+  const size = () => {
+    for (const c of [base, live]) { c.width = W * dpr; c.height = st.H * dpr; c.style.width = W + 'px'; c.style.height = st.H + 'px'; c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0); }
+    paper.style.width = W + 'px'; paper.style.height = st.H + 'px';
+    redraw();
+  };
+  const drawBg = (ctx) => {
+    ctx.fillStyle = '#fffdf8'; ctx.fillRect(0, 0, W, st.H);
+    ctx.save();
+    if (st.bg === 'lines') { ctx.strokeStyle = '#c9d6ea'; ctx.lineWidth = 1; for (let y = 64; y < st.H; y += 34) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } ctx.strokeStyle = '#efb8b8'; ctx.beginPath(); ctx.moveTo(56, 0); ctx.lineTo(56, st.H); ctx.stroke(); }
+    if (st.bg === 'grid') { ctx.strokeStyle = '#dde5f0'; ctx.lineWidth = 1; for (let x = 0; x < W; x += 28) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, st.H); ctx.stroke(); } for (let y = 0; y < st.H; y += 28) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } }
+    if (st.bg === 'dots') { ctx.fillStyle = '#c5cfdd'; for (let x = 14; x < W; x += 28) for (let y = 14; y < st.H; y += 28) { ctx.beginPath(); ctx.arc(x, y, 1.3, 0, 7); ctx.fill(); } }
+    ctx.restore();
+  };
+  const drawStroke = (ctx, s) => {
+    const p = s.p; if (!p.length) return;
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (s.t === 'hl') {
+      ctx.globalAlpha = 0.35; ctx.strokeStyle = s.c; ctx.lineWidth = s.w * 4;
+      ctx.beginPath(); ctx.moveTo(p[0][0], p[0][1]); for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0], p[i][1]); ctx.stroke();
+    } else {
+      ctx.strokeStyle = s.c; ctx.fillStyle = s.c;
+      if (p.length === 1) { ctx.beginPath(); ctx.arc(p[0][0], p[0][1], s.w * (0.35 + p[0][2] * 0.9) / 2, 0, 7); ctx.fill(); }
+      for (let i = 1; i < p.length; i++) {
+        const a = p[i - 1], b = p[i], pa = i > 1 ? p[i - 2] : a;
+        ctx.lineWidth = s.w * (0.35 + ((a[2] + b[2]) / 2) * 0.9);
+        ctx.beginPath();
+        ctx.moveTo((pa[0] + a[0]) / 2, (pa[1] + a[1]) / 2);
+        ctx.quadraticCurveTo(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  };
+  function redraw() { bx.clearRect(0, 0, W, st.H); drawBg(bx); st.strokes.forEach((s) => drawStroke(bx, s)); lx.clearRect(0, 0, W, st.H); }
+  const snapshot = () => { st.undo.push(st.strokes.slice()); if (st.undo.length > 80) st.undo.shift(); st.redo = []; st.dirty = true; };
+  const pos = (ev) => { const r = live.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top, ev.pointerType === 'pen' ? (ev.pressure || 0.5) : 0.5]; };
+  const eraseAt = ([x, y]) => {
+    const r = 14, before = st.strokes.length;
+    st.strokes = st.strokes.filter((s) => !s.p.some(([px, py]) => (px - x) ** 2 + (py - y) ** 2 < (r + s.w) ** 2));
+    if (st.strokes.length !== before) redraw();
+  };
+  live.addEventListener('pointerdown', (ev) => {
+    if (ev.pointerType === 'pen' && !st.sawPen) { st.sawPen = true; setPenOnly(true); }
+    if (st.penOnly && ev.pointerType === 'touch') return; // lòng bàn tay / ngón tay: để cuộn
+    ev.preventDefault();
+    live.setPointerCapture(ev.pointerId);
+    snapshot();
+    if (st.tool === 'eraser') { st.cur = { erasing: true }; eraseAt(pos(ev)); return; }
+    st.cur = { t: st.tool, c: st.color, w: st.size, p: [pos(ev)] };
+  });
+  live.addEventListener('pointermove', (ev) => {
+    if (!st.cur) return;
+    ev.preventDefault();
+    const evs = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
+    if (st.cur.erasing) { evs.forEach((e) => eraseAt(pos(e))); return; }
+    evs.forEach((e) => st.cur.p.push(pos(e)));
+    lx.clearRect(0, 0, W, st.H); drawStroke(lx, st.cur);
+  });
+  const end = () => {
+    if (!st.cur) return;
+    if (!st.cur.erasing) { st.strokes.push(st.cur); drawStroke(bx, st.cur); lx.clearRect(0, 0, W, st.H); }
+    st.cur = null;
+  };
+  live.addEventListener('pointerup', end); live.addEventListener('pointercancel', end); live.addEventListener('pointerleave', (ev) => { if (ev.pointerType !== 'touch') end(); });
+  function setPenOnly(v) {
+    st.penOnly = v;
+    live.style.touchAction = v ? 'pan-y' : 'none';
+    wrap.querySelector('[data-act="pen"]').classList.toggle('on', v);
+    wrap.querySelector('#skHint').textContent = v ? '✋ Chế độ chỉ nhận bút: tay đặt lên màn hình không để lại nét, vuốt ngón tay để cuộn trang.' : 'Viết bằng bút, ngón tay hoặc chuột.';
+  }
+  const close = async () => {
+    if (st.dirty && st.strokes.length && !(await askConfirm('Đóng trang viết tay mà không lưu?', 'Đóng'))) return;
+    wrap.remove(); document.body.style.overflow = $('#modal').classList.contains('hidden') ? '' : 'hidden';
+  };
+  const exportJpeg = (q = 0.9) => {
+    // cắt bớt phần trống phía dưới
+    let maxY = 200; st.strokes.forEach((s) => s.p.forEach(([, y]) => { if (y > maxY) maxY = y; }));
+    const h = Math.min(st.H, Math.ceil(maxY + 60));
+    const c = document.createElement('canvas'); c.width = W * dpr; c.height = h * dpr;
+    const x = c.getContext('2d'); x.drawImage(base, 0, 0, W * dpr, h * dpr, 0, 0, W * dpr, h * dpr);
+    return { c, h };
+  };
+  wrap.addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button'); if (!b) return;
+    if (b.dataset.tool) { st.tool = b.dataset.tool; wrap.querySelectorAll('[data-tool]').forEach((x) => x.classList.toggle('on', x === b)); }
+    if (b.dataset.color) { st.color = b.dataset.color; if (st.tool === 'eraser') wrap.querySelector('[data-tool="pen"]').click(); wrap.querySelectorAll('.sk-c').forEach((x) => x.classList.toggle('on', x === b)); }
+    if (b.dataset.size) { st.size = +b.dataset.size; wrap.querySelectorAll('[data-size]').forEach((x) => x.classList.toggle('on', x === b)); }
+    const a = b.dataset.act;
+    if (a === 'close') close();
+    if (a === 'undo' && st.undo.length) { st.redo.push(st.strokes); st.strokes = st.undo.pop(); redraw(); }
+    if (a === 'redo' && st.redo.length) { st.undo.push(st.strokes); st.strokes = st.redo.pop(); redraw(); }
+    if (a === 'bg') { const i = SK_BGS.findIndex(([k]) => k === st.bg); st.bg = SK_BGS[(i + 1) % SK_BGS.length][0]; toast(SK_BGS[(i + 1) % SK_BGS.length][1], 1200); redraw(); }
+    if (a === 'pen') setPenOnly(!st.penOnly);
+    if (a === 'page') { st.H += Math.round(window.innerHeight * 0.8); size(); setTimeout(() => scroller.scrollTo({ top: st.H, behavior: 'smooth' }), 50); }
+    if (a === 'clear' && st.strokes.length && (await askConfirm('Xoá hết nét trên trang này?', 'Xoá hết'))) { snapshot(); st.strokes = []; redraw(); }
+    if (a === 'ocr') {
+      if (!st.strokes.length) return toast('Trang đang trống');
+      b.disabled = true; b.textContent = '🔤 Đang đọc…';
+      try {
+        const { c } = exportJpeg(0.85);
+        const small = document.createElement('canvas'); const k = Math.min(1, 1600 / c.width); small.width = c.width * k; small.height = c.height * k;
+        small.getContext('2d').drawImage(c, 0, 0, small.width, small.height);
+        const r = await aiJSON({
+          system: 'Bạn đọc chữ viết tay (chủ yếu tiếng Việt, có dấu) trong ảnh. Chép lại CHÍNH XÁC nội dung, giữ xuống dòng, sửa lỗi nhận dạng rõ ràng nhưng không thêm ý. Hình vẽ/sơ đồ thì mô tả ngắn trong ngoặc vuông, ví dụ [hình vẽ ngôi nhà]. Trả JSON {"text": "..."}',
+          messages: [{ role: 'user', text: 'Hãy đọc chữ viết tay trong ảnh này.', images: [{ mime: 'image/jpeg', data: small.toDataURL('image/jpeg', 0.85).split(',')[1] }] }],
+        });
+        wrap.querySelector('.sk-ocr textarea').value = r.text || '';
+        wrap.querySelector('.sk-ocr').classList.remove('hidden');
+      } catch (e) { toast(e.message, 4000); }
+      b.disabled = false; b.textContent = '🔤 Đọc chữ';
+    }
+    if (a === 'ocrx') wrap.querySelector('.sk-ocr').classList.add('hidden');
+    if (a === 'ocrins') { onText?.(wrap.querySelector('.sk-ocr textarea').value.trim()); wrap.querySelector('.sk-ocr').classList.add('hidden'); toast('Đã chèn chữ vào nhật ký ✓'); }
+    if (a === 'save') {
+      if (!st.strokes.length) return toast('Trang đang trống');
+      b.disabled = true; b.textContent = 'Đang lưu…';
+      try {
+        const { c, h } = exportJpeg();
+        const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.9));
+        const r1 = (n) => Math.round(n * 10) / 10;
+        const json = { v: 1, w: W, h, bg: st.bg, strokes: st.strokes.map((s) => ({ t: s.t, c: s.c, w: r1(s.w), p: s.p.map(([x, y, pr]) => [r1(x), r1(y), Math.round(pr * 100) / 100]) })) };
+        await onSave({ blob, json });
+        wrap.remove(); document.body.style.overflow = $('#modal').classList.contains('hidden') ? '' : 'hidden';
+      } catch (e) { toast('Lỗi lưu: ' + e.message, 4000); b.disabled = false; b.textContent = 'Lưu'; }
+    }
+  });
+  wrap.querySelector('.sk-custom input').addEventListener('input', (ev) => { st.color = ev.target.value; wrap.querySelectorAll('.sk-c').forEach((x) => x.classList.remove('on')); ev.target.parentElement.classList.add('on'); });
+  size();
+}
+// Lưu trang viết tay thành ảnh + dữ liệu nét (để sửa tiếp sau này)
+async function saveSketchPhoto({ blob, json }) {
+  const ph = await uploadPhoto(blob);
+  await api('/api/photos/' + ph.id + '_s', { method: 'PUT', body: new Blob([JSON.stringify(json)], { type: 'application/json' }), headers: { 'content-type': 'application/json' } });
+  return { ...ph, sketch: true };
+}
+
 // ============ Trình soạn ============
 function openEditor(entry, opts = {}) {
   const isNew = !entry || !S.entries.some((x) => x.id === entry.id);
@@ -619,6 +863,7 @@ function openEditor(entry, opts = {}) {
     <textarea class="ed-content" id="edContent" placeholder="Viết gì đó…">${esc(e.content)}</textarea>
     <div class="row gap wrap" style="margin-top:6px">
       <button class="btn ghost sm" id="edMic">🎙️ Nói</button>
+      <button class="btn ghost sm" id="edDraw">✍️ Viết tay</button>
       <button class="btn ghost sm" id="edTpl">📋 Mẫu</button>
       <button class="btn ghost sm" id="edAI">✨ AI gợi ý tiêu đề & thẻ</button>
     </div>
@@ -677,10 +922,17 @@ function openEditor(entry, opts = {}) {
   // Ảnh
   const pending = new Set();
   const drawPhotos = () => {
-    $('#edPhotos').innerHTML = e.photos.map((p, i) => `<div class="ph"><img src="${photoUrl(p, 1)}" alt=""><button data-i="${i}" title="Bỏ ảnh">✕</button></div>`).join('') +
+    $('#edPhotos').innerHTML = e.photos.map((p, i) => `<div class="ph ${p.sketch ? 'is-sk' : ''}" data-i="${i}"><img src="${photoUrl(p, 1)}" alt="" ${p.sketch ? 'title="Chạm để viết tiếp"' : ''}>${p.sketch ? '<span class="sk-badge">✍️</span>' : ''}<button data-i="${i}" title="Bỏ ảnh">✕</button></div>`).join('') +
       [...pending].map(() => '<div class="ph loading"><img alt=""></div>').join('') +
       `<label class="add-ph">＋ Ảnh<input type="file" accept="image/*" multiple hidden id="edFile"></label>`;
-    $$('#edPhotos .ph button').forEach((b) => (b.onclick = () => { e.photos.splice(+b.dataset.i, 1); drawPhotos(); dirty(); }));
+    $$('#edPhotos .ph button').forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); e.photos.splice(+b.dataset.i, 1); drawPhotos(); dirty(); }));
+    $$('#edPhotos .ph.is-sk img').forEach((im) => (im.onclick = async () => {
+      const i = +im.parentElement.dataset.i, old = e.photos[i];
+      let data = null;
+      try { const r = await fetch(photoUrl(old.id + '_s'), { credentials: 'same-origin' }); if (r.ok) data = await r.json(); } catch {}
+      if (!data) return toast('Không mở lại được nét vẽ của trang này');
+      openSketch({ data, onText: insertText, onSave: async (res) => { e.photos[i] = await saveSketchPhoto(res); api('/api/photos/' + old.id, { method: 'DELETE' }).catch(() => {}); drawPhotos(); dirty(); } });
+    }));
     $('#edFile').onchange = async (ev) => {
       const files = [...ev.target.files];
       for (const f of files) {
@@ -692,6 +944,9 @@ function openEditor(entry, opts = {}) {
     };
   };
   drawPhotos();
+  const insertText = (t) => { if (!t) return; ta.value = (ta.value.trim() ? ta.value.replace(/\s*$/, '\n\n') : '') + t; grow(); dirty(); };
+  const newSketch = () => openSketch({ onText: insertText, onSave: async (res) => { e.photos.push(await saveSketchPhoto(res)); drawPhotos(); dirty(); } });
+  $('#edDraw').onclick = newSketch;
 
   // Vị trí
   const drawLoc = () => {
@@ -785,6 +1040,7 @@ function openEditor(entry, opts = {}) {
   };
   if (!isNew) $('#edDel').onclick = () => confirmDelete(e.id);
   if (opts.mic) $('#edMic').click();
+  if (opts.draw) newSketch();
   if (opts.photo) $('#edFile')?.click();
   if (opts.locate) $('#locHere')?.click();
 }
@@ -1196,7 +1452,7 @@ RENDER.music = async function () {
   if (!Player.list.length) {
     box.innerHTML = `<div class="card"><h3>🎵 Nghe nhạc từ Google Drive</h3>
       <p class="small">App sẽ tìm tất cả file âm thanh (MP3, M4A, WAV…) trong Drive của bạn và phát ngay trong app, kể cả khi đang viết nhật ký.</p>
-      <p class="muted small">Google sẽ hỏi thêm quyền <b>“Xem các tệp trên Google Drive”</b> (chỉ đọc) — cần quyền này để thấy nhạc bạn đã tải lên trước đây. App không sửa hay xoá file nhạc nào.</p>
+      <p class="muted small">Google sẽ hỏi quyền <b>“Xem các tệp trên Google Drive”</b> (chỉ đọc) — cần quyền này để thấy nhạc bạn đã tải lên trước đây. App không sửa hay xoá file nhạc nào. Nếu đã bật <b>kết nối cố định</b> (Cài đặt → Google Drive), bạn chỉ phải cho phép 1 lần duy nhất.</p>
       <button class="btn primary" id="muScan">🔗 Kết nối & tìm nhạc trên Drive</button> <span class="muted small" id="muMsg"></span></div>`;
     $('#muScan').onclick = async () => {
       $('#muScan').disabled = true; $('#muMsg').textContent = 'Đang tìm nhạc…';
@@ -1236,6 +1492,178 @@ RENDER.music = async function () {
   }));
 };
 document.addEventListener('click', (ev) => { const a = ev.target.closest('[data-play]'); if (a) { ev.preventDefault(); Player.playById(a.dataset.play, a.dataset.name); } });
+
+// ============ Tab Hôm nay: thời tiết, giao thông, xu hướng, tin nóng ============
+const WMO = {
+  0: ['Trời quang', '☀️', '🌙'], 1: ['Ít mây', '🌤️', '🌙'], 2: ['Có mây', '⛅', '☁️'], 3: ['Nhiều mây', '☁️'],
+  45: ['Sương mù', '🌫️'], 48: ['Sương mù', '🌫️'], 51: ['Mưa phùn nhẹ', '🌦️'], 53: ['Mưa phùn', '🌦️'], 55: ['Mưa phùn dày', '🌧️'],
+  56: ['Mưa phùn lạnh', '🌧️'], 57: ['Mưa phùn lạnh', '🌧️'], 61: ['Mưa nhỏ', '🌦️'], 63: ['Mưa vừa', '🌧️'], 65: ['Mưa to', '🌧️'],
+  66: ['Mưa lạnh', '🌧️'], 67: ['Mưa lạnh to', '🌧️'], 71: ['Tuyết nhẹ', '🌨️'], 73: ['Tuyết', '🌨️'], 75: ['Tuyết dày', '❄️'], 77: ['Mưa tuyết', '🌨️'],
+  80: ['Mưa rào nhẹ', '🌦️'], 81: ['Mưa rào', '🌧️'], 82: ['Mưa rào rất to', '⛈️'], 85: ['Tuyết rào', '🌨️'], 86: ['Tuyết rào', '❄️'],
+  95: ['Dông', '⛈️'], 96: ['Dông, mưa đá', '⛈️'], 99: ['Dông, mưa đá lớn', '⛈️'],
+};
+const wx = (code, day = 1) => { const w = WMO[code] || ['—', '🌡️']; return { text: w[0], icon: !day && w[2] ? w[2] : w[1] }; };
+const AQI = (v) => v <= 50 ? ['Tốt', '#2e9e5b'] : v <= 100 ? ['Trung bình', '#d9a400'] : v <= 150 ? ['Kém', '#e67e22'] : v <= 200 ? ['Xấu', '#d64545'] : v <= 300 ? ['Rất xấu', '#8e44ad'] : ['Nguy hại', '#7b3f00'];
+const NEWS_CATS = [['hot', '🔥 Nổi bật'], ['thoi-su', 'Thời sự'], ['the-gioi', 'Thế giới'], ['kinh-doanh', 'Kinh doanh'], ['phap-luat', 'Pháp luật'], ['suc-khoe', 'Sức khỏe'], ['so-hoa', 'Công nghệ'], ['khoa-hoc', 'Khoa học'], ['the-thao', 'Thể thao'], ['giai-tri', 'Giải trí'], ['giao-duc', 'Giáo dục'], ['du-lich', 'Du lịch']];
+const T = { wx: null, wxAt: 0, aq: null, news: {}, trends: null, traffic: null, cat: 'hot' };
+const city = () => S.settings.city || { name: 'Hà Nội', lat: 21.0285, lon: 105.8542 };
+const agoShort = (t) => { if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${Math.max(1, m)} phút` : m < 1440 ? `${Math.round(m / 60)} giờ` : `${Math.round(m / 1440)} ngày`; };
+
+async function loadWeather(force) {
+  const c = city();
+  if (!force && T.wx && Date.now() - T.wxAt < 15 * 60000 && T.wxKey === c.lat + ',' + c.lon) return;
+  const q = `latitude=${c.lat}&longitude=${c.lon}&timezone=auto`;
+  const [w, a] = await Promise.all([
+    fetch(`https://api.open-meteo.com/v1/forecast?${q}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day,precipitation&hourly=temperature_2m,precipitation_probability,weather_code,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset&forecast_days=7`).then((r) => r.json()),
+    fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?${q}&current=us_aqi,pm2_5`).then((r) => r.json()).catch(() => null),
+  ]);
+  if (!w.current) throw new Error(w.reason || 'Không lấy được thời tiết');
+  T.wx = w; T.aq = a; T.wxAt = Date.now(); T.wxKey = c.lat + ',' + c.lon;
+}
+function weatherAdvice() {
+  const w = T.wx, d = w.daily, out = [];
+  if (d.precipitation_probability_max[0] >= 60) out.push('☔ Khả năng mưa cao — nhớ mang ô / áo mưa');
+  if (d.temperature_2m_max[0] >= 35) out.push('🥵 Nắng nóng — uống đủ nước, hạn chế ra ngoài buổi trưa');
+  if (d.temperature_2m_min[0] <= 15) out.push('🧥 Trời lạnh — mặc ấm khi ra ngoài');
+  if (d.uv_index_max[0] >= 8) out.push('🧴 Tia UV rất cao — che chắn, dùng kem chống nắng');
+  const aqi = T.aq?.current?.us_aqi;
+  if (aqi > 100) out.push('😷 Không khí kém — nên đeo khẩu trang, hạn chế tập ngoài trời');
+  if ([95, 96, 99].includes(w.current.weather_code) || d.weather_code[0] >= 95) out.push('⚡ Có dông — tránh trú dưới cây to, cột điện');
+  return out.length ? out : ['😊 Thời tiết khá dễ chịu — một ngày tốt để ra ngoài'];
+}
+function weatherHtml() {
+  const w = T.wx, c = w.current, d = w.daily, cur = wx(c.weather_code, c.is_day);
+  const aqi = T.aq?.current?.us_aqi, [aqiT, aqiC] = aqi != null ? AQI(aqi) : [];
+  const nowH = new Date().getHours();
+  const start = w.hourly.time.findIndex((t) => +t.slice(11, 13) >= nowH && t.slice(0, 10) === d.time[0]);
+  const hours = w.hourly.time.slice(Math.max(0, start), Math.max(0, start) + 12).map((t, i) => {
+    const j = Math.max(0, start) + i, h = wx(w.hourly.weather_code[j], w.hourly.is_day[j]);
+    return `<div class="hr"><small>${i === 0 ? 'Bây giờ' : t.slice(11, 13) + 'h'}</small><span>${h.icon}</span><b>${Math.round(w.hourly.temperature_2m[j])}°</b><small class="rain">${w.hourly.precipitation_probability[j] >= 20 ? '💧' + w.hourly.precipitation_probability[j] + '%' : ''}</small></div>`;
+  }).join('');
+  const days = d.time.map((t, i) => { const x = wx(d.weather_code[i]); return `<div class="dy"><span class="dn">${i === 0 ? 'Hôm nay' : WD[parseDate(t).getDay()] + ' ' + parseDate(t).getDate()}</span><span>${x.icon}</span><span class="dt">${x.text}</span><span class="rain">${d.precipitation_probability_max[i] >= 20 ? '💧' + d.precipitation_probability_max[i] + '%' : ''}</span><span class="tr"><b>${Math.round(d.temperature_2m_max[i])}°</b> ${Math.round(d.temperature_2m_min[i])}°</span></div>`; }).join('');
+  return `<div class="wx-card ${c.is_day ? 'day' : 'night'}">
+    <div class="wx-top"><div><div class="wx-city">📍 ${esc(city().name)} <button class="link-btn" id="wxCity">Đổi</button></div>
+      <div class="wx-now"><span class="wx-icon">${cur.icon}</span><span class="wx-temp">${Math.round(c.temperature_2m)}°</span></div>
+      <div class="wx-desc">${cur.text} · cảm giác ${Math.round(c.apparent_temperature)}°</div></div>
+      <div class="wx-side"><div>💧 Độ ẩm ${c.relative_humidity_2m}%</div><div>🌬️ Gió ${Math.round(c.wind_speed_10m)} km/h</div><div>🔆 UV ${Math.round(d.uv_index_max[0])}</div>
+        <div>🌅 ${d.sunrise[0].slice(11)} · 🌇 ${d.sunset[0].slice(11)}</div>
+        ${aqi != null ? `<div class="aqi" style="--aq:${aqiC}">Không khí: <b>${aqi}</b> ${aqiT}${T.aq.current.pm2_5 != null ? ` · PM2.5 ${Math.round(T.aq.current.pm2_5)}` : ''}</div>` : ''}</div></div>
+    <div class="wx-advice">${weatherAdvice().map((a) => `<div>${a}</div>`).join('')}</div>
+    <div class="wx-hours">${hours}</div>
+    <details class="wx-days"><summary>Dự báo 7 ngày</summary>${days}</details>
+    <div class="row gap wrap" style="margin-top:10px"><button class="btn ghost sm" id="wxNote">📝 Ghi nhật ký kèm thời tiết</button><span class="muted small grow" style="text-align:right">Nguồn: Open-Meteo · cập nhật ${agoShort(T.wxAt)} trước</span></div>
+  </div>`;
+}
+const newsItem = (it, i) => `<div class="nw" data-i="${i}">
+  ${it.img ? `<img src="${esc(it.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
+  <div class="nw-main"><a href="${esc(it.link)}" target="_blank" rel="noopener" class="nw-t">${esc(it.title)}</a>
+  ${it.desc ? `<div class="nw-d">${esc(it.desc)}</div>` : ''}
+  <div class="nw-m">${esc(it.source || '')}${it.date ? ' · ' + agoShort(it.date) + ' trước' : ''} <button class="link-btn" data-save="${i}">🔖 Lưu</button></div></div></div>`;
+
+async function loadNews(cat, force) {
+  if (!force && T.news[cat] && Date.now() - T.news[cat].at < 10 * 60000) return T.news[cat];
+  const d = await api('/api/news?kind=' + cat);
+  T.news[cat] = { ...d, at: Date.now() };
+  return T.news[cat];
+}
+
+RENDER.today = async function (force) {
+  const box = $('#today'), l = lun(localISO());
+  $('#todaySub').textContent = `${longDate(localISO())} · 🌙 ${l.text} âm lịch, năm ${l.yearCC}`;
+  box.innerHTML = `
+    <div id="tdWx"><div class="card skel">Đang tải thời tiết…</div></div>
+    <div class="td-grid">
+      <div>${todayCard()}
+        <div class="card"><div class="row gap"><h3 class="grow">🚦 Giao thông ${esc(city().name)}</h3></div>
+          <div class="row gap wrap" style="margin-bottom:8px"><a class="btn ghost sm" target="_blank" rel="noopener" href="https://www.google.com/maps/@${city().lat},${city().lon},13z/data=!5m1!1e1">🗺️ Bản đồ kẹt xe trực tiếp</a>
+          <a class="btn ghost sm" target="_blank" rel="noopener" href="https://vovgiaothong.vn">📻 VOV Giao thông</a></div>
+          <div id="tdTraffic" class="nw-list"><p class="muted small">Đang tải tin giao thông…</p></div></div>
+        <div class="card"><h3>📈 Mọi người đang tìm gì</h3><div id="tdTrends"><p class="muted small">Đang tải xu hướng…</p></div></div>
+      </div>
+      <div>
+        <div class="card brief"><div class="row gap"><h3 class="grow">✨ Bản tin 1 phút</h3><button class="btn primary sm" id="tdBrief">Tóm tắt bằng AI</button></div><div id="tdBriefOut" class="md small muted">AI đọc tin nóng và thời tiết, tóm tắt thành vài dòng cho bạn.</div></div>
+        <div class="card"><h3>📰 Tin nóng hôm nay</h3>
+          <div class="chips news-cats" id="tdCats">${NEWS_CATS.map(([k, t]) => `<button data-c="${k}" class="${T.cat === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+          <div id="tdNews" class="nw-list"><p class="muted small">Đang tải tin…</p></div></div>
+      </div>
+    </div>`;
+
+  loadWeather(force).then(() => {
+    $('#tdWx').innerHTML = weatherHtml();
+    $('#wxCity').onclick = chooseCity;
+    $('#wxNote').onclick = () => { const c = T.wx.current, x = wx(c.weather_code, c.is_day); openEditor(newEntry({ content: `${x.icon} ${x.text}, ${Math.round(c.temperature_2m)}°C tại ${city().name}.\n\n` }), { focus: true }); };
+  }).catch((e) => { $('#tdWx').innerHTML = `<div class="card"><p class="err">Không tải được thời tiết: ${esc(e.message)}</p><button class="btn ghost sm" id="wxCity">📍 Chọn nơi khác</button></div>`; $('#wxCity').onclick = chooseCity; });
+
+  const bindSave = (el, items) => el.querySelectorAll('[data-save]').forEach((b) => (b.onclick = (ev) => { ev.preventDefault(); openLinkEditor({ url: items[+b.dataset.save].link, title: items[+b.dataset.save].title }); }));
+  const showNews = async (cat, f) => {
+    T.cat = cat;
+    $$('#tdCats button').forEach((b) => b.classList.toggle('on', b.dataset.c === cat));
+    $('#tdNews').innerHTML = '<p class="muted small">Đang tải tin…</p>';
+    try {
+      const d = await loadNews(cat, f);
+      $('#tdNews').innerHTML = d.items.length ? d.items.slice(0, 25).map(newsItem).join('') : '<p class="muted small">Chưa lấy được tin, thử lại sau.</p>';
+      bindSave($('#tdNews'), d.items);
+    } catch (e) { $('#tdNews').innerHTML = `<p class="err small">${esc(e.message)}</p>`; }
+  };
+  $$('#tdCats button').forEach((b) => (b.onclick = () => showNews(b.dataset.c)));
+  showNews(T.cat, force);
+
+  api('/api/news?kind=traffic&city=' + encodeURIComponent(city().name.replace(/^(Thành phố|TP\.?)\s*/i, ''))).then((d) => {
+    $('#tdTraffic').innerHTML = d.items.length ? d.items.slice(0, 8).map(newsItem).join('') : '<p class="muted small">Không có tin giao thông mới trong 2 ngày qua 👍</p>';
+    bindSave($('#tdTraffic'), d.items);
+  }).catch((e) => ($('#tdTraffic').innerHTML = `<p class="err small">${esc(e.message)}</p>`));
+
+  api('/api/news?kind=trends').then((d) => {
+    T.trends = d;
+    if (d.items?.length) {
+      $('#tdTrends').innerHTML = `<div class="trends">${d.items.map((t, i) => `<a class="trend" target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent(t.title)}">
+        <span class="tr-n">${i + 1}</span><span class="tr-t">${esc(t.title)}${t.news?.[0] ? `<small>${esc(t.news[0].title)}</small>` : ''}</span>${t.traffic ? `<span class="tr-v">${esc(t.traffic)}</span>` : ''}</a>`).join('')}</div>`;
+    } else if (d.fallback?.length) {
+      $('#tdTrends').innerHTML = '<p class="muted small">Google Trends tạm không phản hồi — đây là tin được quan tâm:</p>' + d.fallback.slice(0, 8).map(newsItem).join('');
+    } else $('#tdTrends').innerHTML = '<p class="muted small">Chưa lấy được xu hướng.</p>';
+  }).catch((e) => ($('#tdTrends').innerHTML = `<p class="err small">${esc(e.message)}</p>`));
+
+  $('#tdBrief').onclick = async () => {
+    const out = $('#tdBriefOut'); out.classList.remove('muted'); out.classList.add('typing'); out.innerHTML = '';
+    try {
+      const hot = await loadNews('hot');
+      const w = T.wx ? (() => { const c = T.wx.current, d = T.wx.daily; return `${city().name}: ${wx(c.weather_code).text}, ${Math.round(c.temperature_2m)}°C (cao ${Math.round(d.temperature_2m_max[0])}°, thấp ${Math.round(d.temperature_2m_min[0])}°, mưa ${d.precipitation_probability_max[0]}%), AQI ${T.aq?.current?.us_aqi ?? '?'}`; })() : '';
+      const trends = (T.trends?.items || []).slice(0, 10).map((t) => t.title).join(', ');
+      await aiStream({
+        system: systemPrompt() + '\nNhiệm vụ: viết “Bản tin 1 phút” buổi sáng thân thiện. Gồm: 1 câu thời tiết + lời khuyên; 5 tin đáng chú ý nhất (mỗi tin 1 dòng, **in đậm** ý chính, không bịa thêm chi tiết ngoài tiêu đề/mô tả); 1 dòng "Mọi người đang quan tâm"; kết bằng 1 câu động viên ngắn. Tối đa 170 chữ.',
+        messages: [{ role: 'user', text: `THỜI TIẾT: ${w}\nXU HƯỚNG TÌM KIẾM: ${trends}\nTIN NỔI BẬT:\n${hot.items.slice(0, 25).map((x) => `- ${x.title} (${x.source})${x.desc ? ': ' + x.desc : ''}`).join('\n')}` }],
+        onText: (t) => (out.innerHTML = md(t)),
+      });
+    } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+    out.classList.remove('typing');
+  };
+};
+$('#todayRefresh').addEventListener('click', () => { T.news = {}; RENDER.today(true); });
+
+function chooseCity() {
+  openModal(`<div class="sheet-head"><h3>📍 Chọn nơi xem thời tiết</h3><button class="icon-btn" data-close>✕</button></div>
+    <button class="btn primary" id="cHere">📍 Dùng vị trí hiện tại</button>
+    <label class="lbl">Hoặc tìm thành phố / quận</label><input id="cQ" placeholder="vd: Đà Nẵng, Hoàng Mai, Sài Gòn">
+    <div class="suggest hidden" id="cSug"></div>
+    <div class="chips" style="margin-top:12px">${[['Hà Nội', 21.0285, 105.8542], ['TP. Hồ Chí Minh', 10.7769, 106.7009], ['Đà Nẵng', 16.0544, 108.2022], ['Hải Phòng', 20.8449, 106.6881], ['Cần Thơ', 10.0452, 105.7469]].map(([n, a, o]) => `<button data-n="${n}" data-a="${a}" data-o="${o}">${n}</button>`).join('')}</div>`);
+  const pick = (c) => { S.settings.city = c; saveSettings(); closeModal(); T.wx = null; RENDER.today(); };
+  $$('#sheet [data-n]').forEach((b) => (b.onclick = () => pick({ name: b.dataset.n, lat: +b.dataset.a, lon: +b.dataset.o })));
+  $('#cHere').onclick = async () => {
+    $('#cHere').textContent = 'Đang lấy vị trí…';
+    try { const c = await currentPosition(); const name = (await reverseGeo(c.latitude, c.longitude)).split(',').slice(-2).join(',').trim(); pick({ name: name || 'Vị trí của tôi', lat: +c.latitude.toFixed(4), lon: +c.longitude.toFixed(4) }); }
+    catch (e) { toast(e.message); $('#cHere').textContent = '📍 Dùng vị trí hiện tại'; }
+  };
+  $('#cQ').addEventListener('input', debounce(async () => {
+    const q = $('#cQ').value.trim(); if (q.length < 2) return;
+    try {
+      const d = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6&language=vi&format=json`)).json();
+      const res = d.results || [];
+      $('#cSug').innerHTML = res.length ? res.map((r, i) => `<div data-i="${i}">${esc(r.name)}${r.admin1 ? ', ' + esc(r.admin1) : ''}${r.country ? ' · ' + esc(r.country) : ''}</div>`).join('') : '<div>Không tìm thấy</div>';
+      $('#cSug').classList.remove('hidden');
+      $$('#cSug [data-i]').forEach((el) => (el.onclick = () => { const r = res[+el.dataset.i]; pick({ name: r.name, lat: r.latitude, lon: r.longitude }); }));
+    } catch {}
+  }, 400));
+}
 
 // ============ Kho link ============
 const LINK_CATS = [
@@ -1918,12 +2346,49 @@ const Drive = {
     if (window.google?.accounts?.oauth2) return Promise.resolve();
     return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.onload = ok; s.onerror = () => no(new Error('Không tải được Google Sign-In')); document.head.appendChild(s); });
   },
-  scopes: [],
-  async auth(needRead) {
-    const FILE = 'https://www.googleapis.com/auth/drive.file', READ = 'https://www.googleapis.com/auth/drive.readonly';
-    const want = needRead ? [FILE, READ] : [FILE];
-    if (this.token && Date.now() < this.exp - 60000 && want.every((x) => this.scopes.includes(x))) return this.token;
+  scopes: [], server: null,
+  SC: { FILE: 'https://www.googleapis.com/auth/drive.file', READ: 'https://www.googleapis.com/auth/drive.readonly' },
+  // Lấy vé từ máy chủ (kết nối cố định) — không cần cửa sổ đăng nhập
+  async serverToken(want) {
+    try {
+      const r = await fetch('/api/gdrive/token', { credentials: 'same-origin' });
+      if (!r.ok) { if (r.status === 404 || r.status === 409) this.server = { ...(this.server || {}), connected: false }; return null; }
+      const d = await r.json();
+      const sc = (d.scope || '').split(' ');
+      if (!want.every((x) => sc.includes(x))) return null;
+      this.token = d.access_token; this.exp = d.expires_at; this.scopes = sc;
+      return this.token;
+    } catch { return null; }
+  },
+  async serverStatus() {
+    try { this.server = await api('/api/gdrive/status'); } catch { this.server = { available: false }; }
+    return this.server;
+  },
+  // Kết nối cố định: 1 lần đăng nhập Google, máy chủ giữ khoá làm mới
+  async connectPermanent() {
     if (!this.clientId()) throw new Error('Chưa có Google Client ID — xem mục “Google Client ID” bên dưới.');
+    await this.loadGis();
+    const code = await new Promise((ok, no) => {
+      const cc = google.accounts.oauth2.initCodeClient({
+        client_id: this.clientId(),
+        scope: [this.SC.FILE, this.SC.READ, 'openid', 'email'].join(' '),
+        ux_mode: 'popup',
+        callback: (r) => (r.error ? no(new Error(r.error_description || r.error)) : ok(r.code)),
+        error_callback: (e) => no(new Error(e.type === 'popup_closed' ? 'Bạn đã đóng cửa sổ đăng nhập Google' : e.message || 'Lỗi đăng nhập Google')),
+      });
+      cc.requestCode();
+    });
+    await api('/api/gdrive/connect', { method: 'POST', body: { code } });
+    this.token = null;
+    await this.serverStatus();
+  },
+  async auth(needRead) {
+    const want = needRead ? [this.SC.FILE, this.SC.READ] : [this.SC.FILE];
+    if (this.token && Date.now() < this.exp - 60000 && want.every((x) => this.scopes.includes(x))) return this.token;
+    if (await this.serverToken(want)) return this.token;
+    if (!this.clientId()) throw new Error('Chưa có Google Client ID — xem mục “Google Client ID” bên dưới.');
+    if (!this.server) await this.serverStatus();
+    if (this.server?.available && !this.server.connected) { await this.connectPermanent(); if (await this.serverToken(want)) return this.token; }
     await this.loadGis();
     return new Promise((ok, no) => {
       const tc = google.accounts.oauth2.initTokenClient({
@@ -1943,7 +2408,11 @@ const Drive = {
   },
   async g(url, opts = {}) {
     const r = await fetch(url.startsWith('http') ? url : 'https://www.googleapis.com/drive/v3/' + url, { ...opts, headers: { Authorization: 'Bearer ' + this.token, ...(opts.headers || {}) } });
-    if (r.status === 401) { this.token = null; throw new Error('Phiên Google hết hạn, bấm đồng bộ lại'); }
+    if (r.status === 401) {
+      this.token = null;
+      if (!opts._retry && (await this.serverToken(this.scopes.length ? this.scopes.filter((x) => x.includes('drive')) : [this.SC.FILE]))) return this.g(url, { ...opts, _retry: true });
+      throw new Error('Phiên Google hết hạn, bấm đồng bộ lại');
+    }
     if (!r.ok) { const d = await r.json().catch(() => ({})); const e = new Error(d.error?.message || 'Drive lỗi ' + r.status); e.status = r.status; throw e; }
     return opts.raw ? r : r.json();
   },
@@ -1981,7 +2450,8 @@ const Drive = {
     if (this.busy) return;
     this.busy = true;
     try {
-      if (interactive) await this.auth(); else if (!this.token || Date.now() > this.exp - 60000) return;
+      if (interactive) await this.auth();
+      else if ((!this.token || Date.now() > this.exp - 60000) && !(await this.serverToken([this.SC.FILE]))) return;
       await this.loadMap();
       this.status('⏳ Đang chuẩn bị thư mục…');
       await this.folders();
@@ -2062,7 +2532,14 @@ const Drive = {
     await this.loadMap().catch(() => {});
     const last = this.map?.lastSync ? new Date(this.map.lastSync).toLocaleString('vi-VN') : 'chưa bao giờ';
     const link = this.map?.root ? ` · <a href="https://drive.google.com/drive/folders/${this.map.root}" target="_blank" rel="noopener">Mở thư mục trên Drive</a>` : '';
-    this.status((extra ? extra + '<br>' : '') + `Lần đồng bộ gần nhất: <b>${last}</b>${link}${this.clientId() ? '' : '<br>⚠️ Chưa có Google Client ID.'}`);
+    const sv = await this.serverStatus();
+    const perm = !sv.available
+      ? `<div class="perm off">🔓 Chưa bật <b>kết nối cố định</b> — mỗi lần mở app phải cho phép Google lại. Cách bật: thêm biến <code>GOOGLE_CLIENT_SECRET</code> trên Netlify (xem hướng dẫn) rồi deploy lại.</div>`
+      : sv.connected ? `<div class="perm on">🔒 Đã kết nối cố định${sv.email ? ' với <b>' + esc(sv.email) + '</b>' : ''} — nghe nhạc, đồng bộ không cần đăng nhập lại. <button class="link-btn" id="gdOff">Ngắt kết nối</button></div>`
+      : `<div class="perm off">🔗 <button class="btn primary sm" id="gdOn">Kết nối Google Drive cố định</button> <span class="small">Chỉ cần làm 1 lần, sau đó không phải đăng nhập lại.</span></div>`;
+    this.status((extra ? extra + '<br>' : '') + perm + `Lần đồng bộ gần nhất: <b>${last}</b>${link}${this.clientId() ? '' : '<br>⚠️ Chưa có Google Client ID.'}`);
+    $('#gdOn')?.addEventListener('click', async () => { try { await this.connectPermanent(); toast('Đã kết nối cố định ✓'); this.showStatus(); } catch (e) { toast(e.message, 5000); } });
+    $('#gdOff')?.addEventListener('click', async () => { if (await askConfirm('Ngắt kết nối Google Drive? App sẽ không tự đồng bộ và nghe nhạc được nữa cho đến khi kết nối lại.', 'Ngắt')) { await api('/api/gdrive/disconnect', { method: 'POST', body: {} }); this.token = null; this.showStatus(); } });
     $('#syncBadge').textContent = this.map?.lastSync ? '☁️ Drive: ' + new Date(this.map.lastSync).toLocaleDateString('vi-VN') : '';
   },
 };

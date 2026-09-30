@@ -83,6 +83,7 @@ export default async (req, context) => {
         if (!pid) continue;
         await ps.delete(pid).catch(() => {});
         await ps.delete(pid + '_t').catch(() => {});
+        await ps.delete(pid + '_s').catch(() => {});
       }
     }
     return json({ ok: true });

@@ -6,6 +6,9 @@ App gồm các phần:
 - **Kho link (📚)**: lưu link Facebook, YouTube, TikTok, Instagram hay bài báo. Dán link vào là lưu ngay: app tự lấy tiêu đề, ảnh và tên kênh. Bạn ghi chú *link này nói gì, vì sao lưu* (gõ hoặc nói) và chọn chủ đề: Khoa học, Công nghệ & AI, Tài chính & Đầu tư, Sức khỏe, Tâm lý, Lịch sử… Chủ đề riêng thêm được trong Cài đặt. AI có thể **gợi ý chủ đề** nhưng chỉ dựa vào tiêu đề, không xem video, không đọc trang nên rất nhẹ; tắt được trong Cài đặt.
   - Mỗi link có trạng thái 📌 Xem sau, ✅ Đã xem hoặc ⭐ Yêu thích. Lọc được theo chủ đề, nguồn và trạng thái, tìm được theo tiêu đề, ghi chú hoặc kênh. Video YouTube phát được ngay trong app.
   - **Lưu nhanh**: dán một hay nhiều link (mỗi dòng một link). Trên **Android**, sau khi cài app ra màn hình chính, bạn bấm *Chia sẻ → Nhật Ký* ngay trong Facebook hoặc YouTube. Trên **máy tính**, dùng nút dấu trang "📚 Lưu vào Nhật Ký" (xem Cài đặt).
+- **📔 Trang Nhật ký (chỉ dành cho viết)**: trình bày như một trang sổ có dòng kẻ, ghi ngày dương và âm, mỗi ngày một câu gợi ý và chọn cảm xúc một chạm. Có dải **tâm trạng 14 ngày** (chạm vào một ngày để đọc lại), chuỗi ngày viết 🔥, vòng tiến độ tuần, và mục **💌 Nhớ lại** một kỷ niệm cũ. Link đã lưu và ghi chú do AI tạo được ẩn khỏi trang này (bật lại bằng nút "Cả link & ghi chú AI").
+- **✍️ Viết tay**: viết bằng Apple Pencil, bút cảm ứng, ngón tay hoặc chuột. Có bút thường, bút dạ quang, tẩy, 8 màu và màu tuỳ chọn, 4 độ dày nét. Nét đậm nhạt theo lực nhấn bút. Có chế độ **chỉ nhận bút** để tay đặt lên màn hình không để lại nét, hoàn tác/làm lại, 4 kiểu giấy (kẻ dòng, ô vuông, chấm, trơn) và thêm trang. Trang viết tay có thể mở lại để viết tiếp. Nút **🔤 Đọc chữ** nhờ AI chép chữ viết tay thành văn bản, giúp tìm kiếm được.
+- **☀️ Hôm nay**: thời tiết theo giờ và 7 ngày, chất lượng không khí (AQI, PM2.5), lời khuyên (mang ô, chống nắng, đeo khẩu trang…), lịch âm và giờ hoàng đạo, **giao thông** (bản đồ kẹt xe trực tiếp, tin ùn tắc và tai nạn trong thành phố), **xu hướng tìm kiếm** (Google Trends Việt Nam), **tin nóng** theo 12 chuyên mục (VnExpress, Tuổi Trẻ, Thanh Niên, Google News), **bản tin 1 phút** do AI tóm tắt, và nút ghi nhật ký kèm thời tiết.
 - **Thư mục mẹ – con & nhật ký con**: tạo thư mục lồng nhau (ví dụ Công việc → Dự án A), trong một nhật ký thêm nhiều **mục con**. Có 2 chế độ xem: **📅 Theo ngày** và **📁 Theo thư mục** (dạng cây, mở/thu gọn).
 - **🎵 Trình phát nhạc**: nghe file nhạc (MP3, M4A…) có sẵn trong Google Drive ngay trong app. Có danh sách theo thư mục, tìm kiếm, phát trộn, lặp lại, điều khiển trên màn hình khoá, và gắn bài đang nghe vào nhật ký. Lần đầu dùng, Google sẽ hỏi thêm quyền *chỉ đọc* file Drive.
 - **🔐 Bảo mật**: mở khoá bằng **Face ID / vân tay** (passkey, máy chủ xác minh thật), **tự khoá** sau 5 phút đến 12 giờ không dùng, **đăng nhập bằng Gmail** (chỉ tài khoản đã liên kết), **danh sách thiết bị** kèm nút đăng xuất từng máy hoặc tất cả (có hiệu lực ngay), và chặn dò mật khẩu (sai 5 lần thì khoá 15 phút).
@@ -54,6 +57,7 @@ Vào **Site configuration → Environment variables**:
 | `GEMINI_API_KEY` | Nên có | Key Gemini; thiếu key thì các tính năng AI không chạy |
 | `GEMINI_MODEL` | Không | Mặc định `gemini-2.5-flash`. Đổi được ngay trong Cài đặt của app |
 | `GOOGLE_CLIENT_ID` | Cho Drive | Xem `HUONG-DAN-GOOGLE-DRIVE.md` |
+| `GOOGLE_CLIENT_SECRET` | Nên có | Để kết nối Google Drive **cố định** (nghe nhạc, đồng bộ không phải đăng nhập lại). Xem HUONG-DAN-GOOGLE-DRIVE.md |
 | `AUTH_SECRET` | Không | Chuỗi ngẫu nhiên. Đổi chuỗi này, hoặc đổi mật khẩu, thì mọi thiết bị bị đăng xuất |
 
 Sau khi thêm biến, vào **Deploys → Trigger deploy → Deploy site** để biến có hiệu lực.
@@ -80,6 +84,8 @@ netlify/functions/
   photos.mjs             Lưu và đọc ảnh
   kv.mjs                 Cài đặt, lịch sử chat, bản đồ file trên Drive
   unfurl.mjs             Lấy tiêu đề và ảnh xem trước của link
+  news.mjs               Tin nóng, xu hướng, tin giao thông (RSS)
+  gdrive.mjs             Kết nối Google Drive cố định (giữ refresh token phía máy chủ)
 netlify/edge-functions/
   ai.js                  Gọi Gemini, stream câu trả lời (không bị giới hạn 10 giây)
 netlify/lib/token.mjs    Ký và kiểm tra dữ liệu (HMAC)

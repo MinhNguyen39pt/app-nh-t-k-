@@ -27,7 +27,8 @@ export default async (req, context) => {
 
   if (req.method === 'PUT') {
     const type = (req.headers.get('content-type') || '').split(';')[0];
-    if (!OK_TYPES.includes(type)) return json({ error: 'Chỉ nhận ảnh JPEG/PNG/WebP/GIF' }, 400);
+    // Ảnh, hoặc dữ liệu nét vẽ (JSON) của trang viết tay: id kết thúc bằng _s
+    if (!OK_TYPES.includes(type) && !(type === 'application/json' && id.endsWith('_s'))) return json({ error: 'Chỉ nhận ảnh JPEG/PNG/WebP/GIF' }, 400);
     const buf = await req.arrayBuffer();
     if (buf.byteLength > 5.5 * 1024 * 1024) return json({ error: 'Ảnh quá lớn (tối đa ~5MB)' }, 413);
     await store().set(id, buf, { metadata: { type, size: buf.byteLength, at: Date.now() } });
@@ -37,6 +38,7 @@ export default async (req, context) => {
   if (req.method === 'DELETE') {
     await store().delete(id);
     await store().delete(id + '_t').catch(() => {});
+    await store().delete(id + '_s').catch(() => {});
     return json({ ok: true });
   }
 

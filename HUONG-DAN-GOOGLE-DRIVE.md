@@ -42,3 +42,19 @@ Nhật Ký Riêng/
 | `redirect_uri_mismatch` / `origin_mismatch` | Kiểm tra lại Authorized JavaScript origins đúng địa chỉ site, không có `/` ở cuối |
 | `access_denied` | Gmail của bạn chưa có trong danh sách Test users |
 | Cửa sổ đăng nhập không hiện | Cho phép popup cho site trong trình duyệt |
+
+
+## Kết nối cố định (không phải đăng nhập Google lại mỗi lần)
+Nếu không làm phần này, Google chỉ cho app dùng quyền trong **1 giờ**. Mỗi lần mở lại app để nghe nhạc hay đồng bộ, bạn lại phải bấm cho phép. Làm một lần như sau:
+
+1. **Lấy Client Secret:** vào Google Cloud → **Google Auth Platform → Clients**, bấm vào client đã tạo (ví dụ MYNOTE). Ở mục **Client secrets**, copy mã dạng `GOCSPX-...`. Nếu chưa có thì bấm **Add secret**.
+2. **Khai báo trên Netlify:** vào **Project configuration → Environment variables** và thêm:
+   - `GOOGLE_CLIENT_SECRET` = mã `GOCSPX-...` vừa copy
+   - `GOOGLE_CLIENT_ID` = Client ID (dạng `...apps.googleusercontent.com`), nếu chưa có
+   Sau đó vào **Deploys → Trigger deploy**.
+3. **Đưa app sang chế độ chính thức** (quan trọng): ở chế độ *Testing*, Google tự huỷ kết nối sau **7 ngày**.
+   - Vào **Google Auth Platform → Branding**, điền đủ các mục bắt buộc (App name, User support email, Developer contact).
+   - Vào **Audience**, bấm **Publish app** rồi **Confirm**. Không cần gửi Google xác minh vì chỉ mình bạn dùng. Khi đăng nhập, Google sẽ báo "ứng dụng chưa được xác minh": bấm **Nâng cao → Đi tới … (không an toàn)**. Đây là app của chính bạn.
+4. **Kết nối trong app:** vào **Cài đặt → ☁️ Google Drive → Kết nối Google Drive cố định**, chọn Gmail rồi bấm **Cho phép** (tích đủ các ô quyền).
+
+Xong. Từ giờ nghe nhạc, đồng bộ và tự đồng bộ đều không phải đăng nhập Google lại. Máy chủ Netlify giữ "khoá làm mới" ở kho riêng, trình duyệt không đọc được. Muốn thu hồi thì bấm **Ngắt kết nối** trong app, hoặc vào https://myaccount.google.com/permissions.

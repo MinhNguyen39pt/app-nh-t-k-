@@ -15,7 +15,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&family=Patrick+Hand&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
@@ -40,7 +40,8 @@
 <div id="app" class="app hidden">
   <nav class="nav" id="nav">
     <div class="brand"><span>📖</span><b>Nhật Ký Riêng</b></div>
-    <button data-view="timeline" class="active"><i>🗓️</i><span>Nhật ký</span></button>
+    <button data-view="timeline" class="active"><i>📔</i><span>Nhật ký</span></button>
+    <button data-view="today"><i>☀️</i><span>Hôm nay</span></button>
     <button data-view="links"><i>📚</i><span>Kho link</span></button>
     <button data-view="music"><i>🎵</i><span>Nhạc</span></button>
     <button data-view="assistant"><i>✨</i><span>Trợ lý</span></button>
@@ -57,20 +58,24 @@
     <!-- DÒNG THỜI GIAN -->
     <section id="v-timeline" class="view active">
       <div class="hero" id="hero"></div>
-      <div class="tiles" id="tiles"></div>
-
-      <div class="card capture">
-        <textarea id="quick" rows="3" placeholder="Hôm nay có gì? Kể bừa ra đây, hoặc dán link — AI sẽ sắp xếp giúp bạn…"></textarea>
-        <div class="row gap wrap">
-          <button class="btn ghost sm" id="quickMic" title="Nói để ghi">🎙️ Nói</button>
+      <div class="j-wrap">
+      <div class="j-main">
+      <div class="diary-page" id="composer">
+        <div class="dp-head"><span class="dp-date" id="dpDate"></span><span class="dp-lunar" id="dpLunar"></span></div>
+        <div class="dp-prompt"><span id="dpPrompt"></span><button class="icon-btn" id="dpNext" title="Gợi ý khác">🔄</button></div>
+        <textarea id="quick" class="dp-text" rows="5" placeholder="Hôm nay của bạn thế nào? Viết vài dòng thôi cũng được…"></textarea>
+        <div class="dp-mood" id="dpMood"></div>
+        <div class="dp-tools">
+          <button class="dp-btn" id="quickMic" title="Nói để ghi">🎙️<span>Nói</span></button>
+          <button class="dp-btn" id="quickDraw" title="Viết tay bằng bút / ngón tay">✍️<span>Viết tay</span></button>
+          <button class="dp-btn" id="quickPhoto" title="Thêm ảnh">📷<span>Ảnh</span></button>
+          <button class="dp-btn" id="quickPlace" title="Gắn vị trí">📍<span>Nơi đây</span></button>
+          <button class="dp-btn" id="quickLesson" title="Ghi bài học">💡<span>Bài học</span></button>
           <span class="grow"></span>
-          <button class="btn ghost sm" id="quickSave">Lưu nhanh</button>
-          <button class="btn primary sm" id="quickAI">✨ AI sắp xếp</button>
+          <button class="btn ghost sm" id="quickAI" title="AI sắp xếp đoạn kể thành các mục">✨ AI</button>
+          <button class="btn primary" id="quickSave">Lưu trang</button>
         </div>
       </div>
-
-      <div id="promptCard"></div>
-      <div id="onThisDay"></div>
 
       <div class="filters">
         <div class="chips" id="viewMode"></div>
@@ -79,6 +84,20 @@
         <select id="tagFilter"><option value="">Tất cả thẻ</option></select>
       </div>
       <div id="timeline"></div>
+      </div>
+      <aside class="j-side">
+        <div class="mood-strip card" id="moodStrip"></div>
+        <div id="onThisDay"></div>
+        <div class="card side-box" id="sideStats"></div>
+      </aside>
+      </div>
+    </section>
+
+    <!-- HÔM NAY -->
+    <section id="v-today" class="view">
+      <header class="vhead"><div><h2>☀️ Hôm nay</h2><p class="muted" id="todaySub"></p></div>
+        <button class="btn ghost sm" id="todayRefresh">🔄 Làm mới</button></header>
+      <div id="today"></div>
     </section>
 
     <!-- KHO LINK -->
