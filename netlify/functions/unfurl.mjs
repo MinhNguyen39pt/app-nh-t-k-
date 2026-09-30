@@ -1,4 +1,5 @@
-import { json, deny, isAuthed } from '../lib/token.mjs';
+import { json } from '../lib/token.mjs';
+import { guard } from '../lib/session.mjs';
 
 // Lấy tiêu đề / mô tả / ảnh / (tuỳ chọn) nội dung chữ của một link.
 // Hỗ trợ riêng: YouTube, TikTok (oEmbed), Facebook (giả crawler của Facebook để đọc thẻ og:).
@@ -75,7 +76,8 @@ async function oembed(endpoint) {
 }
 
 export default async (req) => {
-  if (!(await isAuthed(req))) return deny();
+  const denied = await guard(req);
+  if (denied) return denied;
   const q = new URL(req.url).searchParams;
   const full = q.get('full') === '1';
   let u;

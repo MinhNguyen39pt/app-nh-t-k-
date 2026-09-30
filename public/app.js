@@ -80,8 +80,8 @@ async function api(path, opts = {}) {
     o.headers['content-type'] = 'application/json';
   }
   const r = await fetch(path, o);
-  if (r.status === 401 && path !== '/api/auth') { showLogin(); throw new Error('Chưa đăng nhập'); }
   const data = await r.json().catch(() => ({}));
+  if (r.status === 401 && !path.startsWith('/api/auth')) { showLogin(data.code === 'locked' ? 'locked' : 'login'); throw new Error(data.error || 'Chưa đăng nhập'); }
   if (!r.ok) throw new Error(data.error || `Lỗi ${r.status}`);
   return data;
 }
@@ -96,6 +96,7 @@ const S = {
   filter: { q: '', type: '', tag: '' },
   view: 'timeline',
   tuvi: {},
+  folders: [],
 };
 const byDateDesc = (a, b) => (b.date || '').localeCompare(a.date || '') || b.createdAt - a.createdAt;
 const allTags = () => {
@@ -109,42 +110,104 @@ function applyTheme() {
   const t = S.settings.theme || 'auto';
   if (t === 'auto') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
-  $('#linkAutoAI').addEventListener('change', (ev) => { S.settings.linkAutoAI = ev.target.checked; saveSettings(); });
-$('#bookmarklet').addEventListener('click', (ev) => { ev.preventDefault(); toast('Hãy kéo nút này lên thanh dấu trang của trình duyệt'); });
-$$('#themeChips button').forEach((b) => b.classList.toggle('on', b.dataset.theme === t));
+  $$('#themeChips button').forEach((b) => b.classList.toggle('on', b.dataset.theme === t));
 }
 const saveSettings = debounce(() => kvSet('settings', S.settings).catch(() => {}), 600);
 
-// ============ Đăng nhập ============
-function showLogin() {
+// ============ Đăng nhập / mở khoá ============
+const loadWebAuthn = () => (window.SimpleWebAuthnBrowser ? Promise.resolve() : new Promise((ok, no) => {
+  const s = document.createElement('script'); s.src = '/vendor/webauthn.js'; s.onload = ok; s.onerror = () => no(new Error('Không tải được thư viện Face ID')); document.head.appendChild(s);
+}));
+const canPasskey = () => !!window.PublicKeyCredential;
+async function passkeyLogin() {
+  await loadWebAuthn();
+  const opts = await api('/api/auth/passkey-login-options', { method: 'POST', body: {} });
+  let resp;
+  try { resp = await SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: opts }); }
+  catch (e) { throw new Error(e.name === 'NotAllowedError' ? 'Bạn đã huỷ hoặc hết thời gian quét' : e.message); }
+  await api('/api/auth/passkey-login', { method: 'POST', body: { response: resp } });
+}
+async function passkeyRegister() {
+  await loadWebAuthn();
+  const opts = await api('/api/auth/passkey-reg-options', { method: 'POST', body: {} });
+  let resp;
+  try { resp = await SimpleWebAuthnBrowser.startRegistration({ optionsJSON: opts }); }
+  catch (e) { throw new Error(e.name === 'InvalidStateError' ? 'Máy này đã được thiết lập Face ID / vân tay rồi' : e.name === 'NotAllowedError' ? 'Bạn đã huỷ' : e.message); }
+  await api('/api/auth/passkey-reg', { method: 'POST', body: { response: resp } });
+}
+function googleButton(el, onCredential) {
+  if (!S.cfg.googleClientId) return false;
+  Drive.loadGis().then(() => {
+    google.accounts.id.initialize({ client_id: S.cfg.googleClientId, callback: (r) => onCredential(r.credential), auto_select: false, ux_mode: 'popup' });
+    el.innerHTML = '';
+    google.accounts.id.renderButton(el, { theme: 'outline', size: 'large', shape: 'pill', text: 'signin_with', locale: 'vi', width: 280 });
+  }).catch(() => {});
+  return true;
+}
+
+let appShown = false;
+async function showLogin(mode) {
+  if (appShown) { location.reload(); return; } // xoá dữ liệu khỏi bộ nhớ khi bị khoá / đăng xuất
+  if (!S.cfg || S.cfg.ok === undefined) { try { S.cfg = await api('/api/auth'); } catch { S.cfg = {}; } }
+  const locked = mode === 'locked' || S.cfg.locked;
   $('#app').classList.add('hidden');
   $('#login').classList.remove('hidden');
-  setTimeout(() => $('#loginPass').focus(), 50);
+  $('#loginLogo').textContent = locked ? '🔒' : '📖';
+  $('#loginTitle').textContent = locked ? 'Nhật ký đang khoá' : 'Nhật Ký Riêng';
+  $('#loginSub').textContent = locked ? 'Xác minh để tiếp tục — dữ liệu của bạn vẫn an toàn.' : 'Nơi cất giữ ngày tháng, bài học, nơi chốn và những điều hay ho của bạn.';
+  const pk = S.cfg.hasPasskey && canPasskey();
+  $('#pkLogin').classList.toggle('hidden', !pk);
+  const g = S.cfg.googleLogin && googleButton($('#gLogin'), async (credential) => {
+    try { await api('/api/auth/google', { method: 'POST', body: { credential } }); location.reload(); }
+    catch (e) { $('#loginErr').textContent = e.message; }
+  });
+  $('#gLogin').classList.toggle('hidden', !g);
+  $('#orLine').classList.toggle('hidden', !(pk || g));
+  $('#loginBtn').className = 'btn block ' + (pk ? 'ghost' : 'primary');
+  if (!pk) setTimeout(() => $('#loginPass').focus(), 50);
+  if (S.cfg.configured === false) $('#loginErr').textContent = 'Chủ app chưa đặt APP_PASSWORD trên Netlify.';
 }
+$('#pkLogin').addEventListener('click', async () => {
+  $('#loginErr').textContent = '';
+  $('#pkLogin').disabled = true;
+  try { await passkeyLogin(); location.reload(); }
+  catch (e) { $('#loginErr').textContent = e.message; }
+  $('#pkLogin').disabled = false;
+});
 $('#loginForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   $('#loginErr').textContent = '';
   try {
     await api('/api/auth', { method: 'POST', body: { password: $('#loginPass').value } });
     $('#loginPass').value = '';
-    boot();
+    location.reload();
   } catch (e) {
     $('#loginErr').textContent = e.message;
   }
 });
 
+// Tự khoá khi rời app quá lâu
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  const lm = S.cfg?.lockMinutes;
+  if (appShown && lm && hiddenAt && Date.now() - hiddenAt > lm * 60000) lockApp();
+});
+async function lockApp() {
+  await fetch('/api/auth/lock-now', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  location.reload();
+}
+
 async function boot() {
   let cfg;
   try { cfg = await api('/api/auth'); } catch (e) { cfg = { ok: false }; }
   S.cfg = cfg;
-  if (!cfg.ok) {
-    showLogin();
-    if (cfg.configured === false) $('#loginErr').textContent = 'Chủ app chưa đặt APP_PASSWORD trên Netlify.';
-    return;
-  }
+  if (!cfg.ok) return showLogin(cfg.locked ? 'locked' : 'login');
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
-  const [ents, st, tv] = await Promise.all([api('/api/entries'), kvGet('settings').catch(() => null), kvGet('tuvi').catch(() => null)]);
+  appShown = true;
+  const [ents, st, tv, fo] = await Promise.all([api('/api/entries'), kvGet('settings').catch(() => null), kvGet('tuvi').catch(() => null), kvGet('folders').catch(() => null)]);
+  S.folders = Array.isArray(fo) ? fo : [];
   S.tuvi = tv || {};
   S.entries = ents.entries.sort(byDateDesc);
   Object.assign(S.settings, st || {});
@@ -160,24 +223,34 @@ function go(view) {
   if (!$('#v-' + view)) view = 'timeline';
   S.view = view;
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'v-' + view));
-  $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+  $$('#nav button[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+  $('#navMore').classList.toggle('active', !!$(`#nav .nav-extra[data-view="${view}"]`));
   $('#fab').classList.toggle('hidden', view === 'assistant' || view === 'settings' || view === 'tuvi');
   if (location.hash.slice(1) !== view) history.replaceState(null, '', '#' + view);
   RENDER[view]?.();
   window.scrollTo(0, 0);
 }
-$$('#nav button').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
+$$('#nav button[data-view]').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
+$('#navMore').addEventListener('click', () => {
+  const items = $$('#nav .nav-extra').map((b) => `<button data-go="${b.dataset.view}">${b.querySelector('i').textContent} ${b.querySelector('span').textContent}</button>`).join('');
+  openModal(`<div class="sheet-head"><h3>Thêm</h3><button class="icon-btn" data-close>✕</button></div><div class="menu-list">${items}</div>`);
+  $$('.menu-list [data-go]').forEach((b) => (b.onclick = () => { closeModal(); go(b.dataset.go); }));
+});
 $('#fab').addEventListener('click', () => (S.view === 'links' ? openLinkEditor() : openEditor()));
 const rerender = () => RENDER[S.view]?.();
 
 // ============ Lưu / xoá ============
 async function saveEntry(e) {
   e.updatedAt = Date.now();
+  const today = dayKey(localISO());
+  const firstToday = !S.entries.some((x) => x.id === e.id) && dayKey(e.date) === today && !S.entries.some((x) => dayKey(x.date) === today);
   const r = await api('/api/entries', { method: 'POST', body: e });
   const saved = r.entries[0] || e;
+  if (firstToday) setTimeout(() => celebrate(streak()), 300);
   const i = S.entries.findIndex((x) => x.id === saved.id);
   if (i >= 0) S.entries[i] = saved; else S.entries.push(saved);
   S.entries.sort(byDateDesc);
+  if (saved.folderId) { folderPath(saved.folderId).forEach((f) => openFolders.add(f.id)); saveOpen(); } // mở sẵn thư mục chứa mục vừa lưu
   Drive.autoSync();
   return saved;
 }
@@ -192,15 +265,76 @@ const newEntry = (over = {}) => ({
 });
 
 // ============ Dòng thời gian ============
-function greet() {
+// ============ Trang chủ thân thiện ============
+const TYPE_COLORS = { nhatky: '#d9774f', baihoc: '#d99a1e', ghichu: '#4f7fd9', link: '#8a5cd6', diadiem: '#17a673', ytuong: '#d94f8f', muctieu: '#d64545' };
+const PROMPTS_DAY = [
+  'Điều gì hôm nay khiến bạn mỉm cười?', 'Một việc nhỏ bạn làm tốt hôm nay là gì?', 'Hôm nay bạn học được điều gì mới?',
+  'Ai là người bạn muốn cảm ơn lúc này? Vì sao?', 'Nếu được làm lại hôm nay, bạn sẽ đổi điều gì?', 'Điều gì đang chiếm nhiều suy nghĩ của bạn nhất?',
+  'Ba điều bạn biết ơn hôm nay?', 'Khoảnh khắc yên bình nhất trong ngày của bạn?', 'Bạn đang mong chờ điều gì trong tuần này?',
+  'Một nỗi lo bạn muốn buông xuống?', 'Hôm nay cơ thể bạn cảm thấy thế nào?', 'Một câu nói / đoạn đọc được làm bạn nhớ?',
+  'Bạn đã giúp ai hoặc được ai giúp hôm nay?', 'Điều gì khiến bạn tự hào về bản thân gần đây?', 'Mục tiêu nhỏ nào bạn muốn làm vào ngày mai?',
+  'Một món ăn / nơi chốn đáng nhớ gần đây?', 'Bạn muốn nói gì với chính mình của 5 năm trước?', 'Thói quen nào bạn muốn bắt đầu?',
+  'Hôm nay có điều gì làm bạn bất ngờ?', 'Nếu hôm nay là một bài hát, đó sẽ là bài gì?', 'Bạn đã dành thời gian cho ai?',
+  'Một sai lầm và bài học rút ra?', 'Điều gì giúp bạn nạp lại năng lượng?', 'Ước mơ lớn nhất lúc này của bạn?',
+  'Một điều bạn muốn học trong tháng này?', 'Bạn đã nói "không" với điều gì? Có đúng không?', 'Kỷ niệm tuổi thơ nào chợt nhớ gần đây?',
+  'Bạn đánh giá hôm nay mấy điểm / 10? Vì sao?', 'Tin nhắn nào làm bạn vui gần đây?', 'Điều gì bạn muốn nhớ mãi về giai đoạn này?',
+];
+let promptShift = 0;
+const dayOfYear = () => Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 864e5);
+
+function renderHome() {
+  const now = localISO(), today = dayKey(now), l = lun(now);
   const h = new Date().getHours();
-  const name = S.settings.userName ? ', ' + S.settings.userName : '';
-  const g = h < 11 ? 'Chào buổi sáng' : h < 14 ? 'Chào buổi trưa' : h < 18 ? 'Chào buổi chiều' : 'Chào buổi tối';
-  $('#greet').textContent = g + name;
-  const today = dayKey(localISO());
-  const n = S.entries.filter((e) => dayKey(e.date) === today).length;
-  $('#todayLine').textContent = `${fmtDate(localISO())} (âm ${lun(localISO()).text}) · ${n ? `hôm nay đã ghi ${n} mục` : 'hôm nay chưa ghi gì'} · streak ${streak()} ngày`;
+  const g = h < 5 ? 'Khuya rồi' : h < 11 ? 'Chào buổi sáng' : h < 14 ? 'Chào buổi trưa' : h < 18 ? 'Chào buổi chiều' : 'Chào buổi tối';
+  const icon = h < 5 ? '🌙' : h < 11 ? '🌤️' : h < 14 ? '☀️' : h < 18 ? '🌇' : '🌙';
+  const todays = S.entries.filter((e) => dayKey(e.date) === today);
+  const moodToday = todays.find((e) => e.mood)?.mood;
+  const st = streak();
+  $('#hero').innerHTML = `
+    <div class="hero-top">
+      <div><div class="hero-hi">${icon} ${g}${S.settings.userName ? ', ' + esc(S.settings.userName) : ''}</div>
+      <div class="hero-date">${fmtDate(now)} · 🌙 âm ${l.text} ${l.yearCC}</div></div>
+      <div class="streak ${st ? 'on' : ''}" title="Số ngày viết liên tiếp"><span class="fire">🔥</span><b>${st}</b><small>ngày</small></div>
+    </div>
+    <div class="hero-q">${moodToday ? `Hôm nay bạn đang <b>${MOOD_NAMES[moodToday].toLowerCase()}</b> ${MOODS[moodToday]} · đã ghi ${todays.length} mục` : todays.length ? `Hôm nay đã ghi ${todays.length} mục — bạn thấy thế nào?` : 'Hôm nay bạn thấy thế nào?'}</div>
+    <div class="mood-pick">${[5, 4, 3, 2, 1].map((m) => `<button data-mood="${m}" class="${moodToday === m ? 'on' : ''}"><span>${MOODS[m]}</span><small>${MOOD_NAMES[m]}</small></button>`).join('')}</div>`;
+  $$('#hero [data-mood]').forEach((b) => (b.onclick = () => openEditor(newEntry({ mood: +b.dataset.mood }), { focus: true })));
+
+  const TILES = [
+    ['✍️', 'Viết', () => openEditor()], ['🎙️', 'Nói', () => openEditor(null, { mic: true })], ['📷', 'Ảnh', () => openEditor(null, { photo: true })],
+    ['📍', 'Check-in', () => openEditor(newEntry({ type: 'diadiem' }), { locate: true })], ['💡', 'Bài học', () => openEditor(newEntry({ type: 'baihoc', content: TEMPLATES.baihoc }))],
+    ['🔗', 'Lưu link', () => { go('links'); openLinkEditor(); }], ['🎵', 'Nghe nhạc', () => go('music')], ['✨', 'Hỏi AI', () => go('assistant')],
+  ];
+  $('#tiles').innerHTML = TILES.map(([i, t], k) => `<button class="tile" data-k="${k}" style="--i:${k}"><span>${i}</span>${t}</button>`).join('');
+  $$('#tiles .tile').forEach((b) => (b.onclick = () => TILES[+b.dataset.k][2]()));
+
+  const p = PROMPTS_DAY[(dayOfYear() + promptShift) % PROMPTS_DAY.length];
+  $('#promptCard').innerHTML = S.filter.q ? '' : `<div class="card prompt-card"><div class="pc-label">💭 Gợi ý viết hôm nay</div><div class="pc-q">${esc(p)}</div>
+    <div class="row gap"><button class="btn primary sm" id="pcWrite">✍️ Viết về điều này</button><button class="btn ghost sm" id="pcNext">🔄 Câu khác</button></div></div>`;
+  if ($('#pcWrite')) {
+    $('#pcWrite').onclick = () => openEditor(newEntry({ title: p }), { focus: true });
+    $('#pcNext').onclick = () => { promptShift++; renderHome(); };
+  }
 }
+
+// Hiệu ứng mừng khi giữ chuỗi ngày viết
+function celebrate(n) {
+  const wrap = document.createElement('div');
+  wrap.className = 'confetti';
+  const bits = ['🎉', '✨', '🔥', '💛', '🌟', '🎊'];
+  for (let i = 0; i < 26; i++) {
+    const s = document.createElement('span');
+    s.textContent = bits[i % bits.length];
+    s.style.left = Math.random() * 100 + 'vw';
+    s.style.animationDelay = Math.random() * 0.4 + 's';
+    s.style.fontSize = 16 + Math.random() * 18 + 'px';
+    wrap.appendChild(s);
+  }
+  document.body.appendChild(wrap);
+  setTimeout(() => wrap.remove(), 2600);
+  toast(n > 1 ? `🔥 Chuỗi ${n} ngày liên tiếp! Giữ lửa nhé` : '🌱 Mục đầu tiên hôm nay — bắt đầu chuỗi mới!', 3500);
+}
+
 function streak() {
   const days = new Set(S.entries.map((e) => dayKey(e.date)));
   let d = new Date(), n = 0;
@@ -215,7 +349,7 @@ function entryCard(e) {
   const thumbs = e.photos.slice(0, 5).map((p) => `<img loading="lazy" src="${photoUrl(p, 1)}" alt="">`).join('');
   const more = e.photos.length > 5 ? `<span class="muted small">+${e.photos.length - 5}</span>` : '';
   const excerpt = plain(e.content).slice(0, 280);
-  return `<article class="entry" data-id="${e.id}">
+  return `<article class="entry" data-id="${e.id}" style="--tc:${TYPE_COLORS[e.type] || '#888'}">
     <div class="e-date"><b>${d.getDate()}</b><span>${WD[d.getDay()]} · ${fmtTime(e.date) || ''}</span><span class="lunar" title="Âm lịch">âm ${lun(e.date).text}</span><span class="e-type" title="${t.name}">${t.icon}</span></div>
     <div class="e-body">
       ${e.title ? `<div class="e-title">${esc(e.title)}</div>` : ''}
@@ -225,6 +359,10 @@ function entryCard(e) {
       <div class="e-meta">
         ${e.mood ? `<span title="${MOOD_NAMES[e.mood]}">${MOODS[e.mood]}</span>` : ''}
         ${e.category ? `<span class="cat">${catIcon(e.category)} ${esc(e.category)}</span>` : ''}
+        ${e.folderId && folderById(e.folderId) ? `<span class="cat">📁 ${esc(folderById(e.folderId).name)}</span>` : ''}
+        ${e.parentId && entryExists(e.parentId) ? `<span>↳ ${esc((S.entries.find((x) => x.id === e.parentId).title || 'mục mẹ').slice(0, 30))}</span>` : ''}
+        ${childrenOf(e.id).length ? `<span>🧩 ${childrenOf(e.id).length} mục con</span>` : ''}
+        ${e.music ? `<span>🎵 ${esc(e.music.name.slice(0, 30))}</span>` : ''}
         ${e.location ? `<span>📍 ${esc(shortPlace(e.location.name))}</span>` : ''}
         ${e.links.length ? `<span>🔗 ${e.links.length}</span>` : ''}
         ${e.tags.map((x) => `<span class="tag">#${esc(x)}</span>`).join('')}
@@ -248,10 +386,10 @@ function filtered() {
 }
 
 RENDER.timeline = function () {
-  greet();
+  renderHome();
   // Bộ lọc loại
   $('#typeChips').innerHTML = `<button data-t="" class="${!S.filter.type ? 'on' : ''}">Tất cả</button>` +
-    Object.entries(TYPES).map(([k, t]) => `<button data-t="${k}" class="${S.filter.type === k ? 'on' : ''}">${t.icon} ${t.name}</button>`).join('');
+    Object.entries(TYPES).map(([k, t]) => `<button data-t="${k}" style="--tc:${TYPE_COLORS[k]}" class="tchip ${S.filter.type === k ? 'on' : ''}">${t.icon} ${t.name}</button>`).join('');
   $$('#typeChips button').forEach((b) => (b.onclick = () => { S.filter.type = b.dataset.t; RENDER.timeline(); }));
   $('#tagFilter').innerHTML = '<option value="">Tất cả thẻ</option>' + allTags().map(([t, n]) => `<option value="${esc(t)}" ${S.filter.tag === t ? 'selected' : ''}>#${esc(t)} (${n})</option>`).join('');
 
@@ -268,7 +406,10 @@ RENDER.timeline = function () {
   $('#onThisDay').innerHTML = (S.filter.q ? '' : todayCard()) + (otd.length && !S.filter.q ? `<div class="card otd"><h3>🕰️ Ngày này năm xưa</h3>${otd.map((e) =>
     `<div class="item" data-id="${e.id}"><b>${otdTag(e)}</b> · ${TYPES[e.type]?.icon || ''} ${esc(e.title || plain(e.content).slice(0, 80))}</div>`).join('')}</div>` : '');
 
+  $('#viewMode').innerHTML = `<button data-v="date" class="${S.settings.viewMode !== 'folder' ? 'on' : ''}">📅 Theo ngày</button><button data-v="folder" class="${S.settings.viewMode === 'folder' ? 'on' : ''}">📁 Theo thư mục</button>`;
+  $$('#viewMode button').forEach((b) => (b.onclick = () => { S.settings.viewMode = b.dataset.v; saveSettings(); RENDER.timeline(); }));
   const list = filtered();
+  if (S.settings.viewMode === 'folder') return renderFolderView(list);
   if (!list.length) {
     $('#timeline').innerHTML = S.entries.length
       ? '<div class="empty"><b>🔍</b>Không tìm thấy mục nào.</div>'
@@ -284,7 +425,6 @@ RENDER.timeline = function () {
   if (list.length > 400) html += `<p class="muted small">Đang hiện 400/${list.length} mục. Dùng ô tìm kiếm để lọc.</p>`;
   $('#timeline').innerHTML = html;
 };
-$('#timeline').addEventListener('click', (ev) => { const a = ev.target.closest('.entry'); if (a) openViewer(a.dataset.id); });
 $('#onThisDay').addEventListener('click', (ev) => { const a = ev.target.closest('.item'); if (a) openViewer(a.dataset.id); });
 $('#search').addEventListener('input', debounce((ev) => { S.filter.q = ev.target.value; RENDER.timeline(); }, 200));
 $('#tagFilter').addEventListener('change', (ev) => { S.filter.tag = ev.target.value; RENDER.timeline(); });
@@ -461,7 +601,7 @@ function currentPosition() {
 }
 
 // ============ Trình soạn ============
-function openEditor(entry) {
+function openEditor(entry, opts = {}) {
   const isNew = !entry || !S.entries.some((x) => x.id === entry.id);
   const e = structuredClone(entry || newEntry());
   const place = e._place; delete e._place;
@@ -498,11 +638,17 @@ function openEditor(entry) {
     <input id="edTags" list="tagList" value="${esc(e.tags.join(', '))}" placeholder="vd: công việc, gia đình, sức khoẻ">
     <datalist id="tagList">${tagOpts}</datalist>
 
+    <label class="lbl">📁 Thư mục</label>
+    <div class="row gap"><select id="edFolder">${folderOptions(e.folderId)}</select><button class="btn ghost sm" id="edNewFolder" style="white-space:nowrap">＋ Thư mục</button></div>
+    <label class="lbl">🧩 Là mục con của</label>
+    <select id="edParent">${parentOptions(e)}</select>
+    <div id="edMusic" style="margin-top:10px"></div>
+
     <div class="sheet-foot">
       <button class="btn primary" id="edSave">Lưu</button>
       <button class="btn ghost" data-close>Huỷ</button>
       <span class="grow"></span>
-      ${isNew ? '' : '<button class="btn danger" id="edDel">Xoá</button>'}
+      ${isNew ? '' : '<button class="btn danger" id="edDel">🗑 Xoá</button>'}
     </div>`);
 
   const sheet = $('#sheet');
@@ -511,9 +657,18 @@ function openEditor(entry) {
   const ta = $('#edContent');
   const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 4, window.innerHeight * 0.6) + 'px'; };
   ta.addEventListener('input', grow); setTimeout(grow, 0);
-  if (isNew && !e.content) setTimeout(() => ta.focus(), 60);
+  if ((isNew && !e.content && !opts.mic && !opts.photo) || opts.focus) setTimeout(() => ta.focus(), 60);
 
-  $('#edClose').onclick = () => { if (!sheet.hasAttribute('data-dirty') || confirm('Bỏ các thay đổi chưa lưu?')) closeModal(); };
+  $('#edClose').onclick = async () => { if (!sheet.hasAttribute('data-dirty') || (await askConfirm('Bỏ các thay đổi chưa lưu?', 'Bỏ thay đổi'))) closeModal(); };
+  $('#edNewFolder').onclick = async () => { const f = await createFolder($('#edFolder').value); if (f) { $('#edFolder').innerHTML = folderOptions(f.id); dirty(); } };
+  $('#edParent').onchange = () => { const p = S.entries.find((x) => x.id === $('#edParent').value); if (p && !$('#edFolder').value && p.folderId) $('#edFolder').innerHTML = folderOptions(p.folderId); };
+  const drawMusic = () => {
+    $('#edMusic').innerHTML = e.music ? `<span class="loc-chip">🎵 ${esc(e.music.name)}</span> <button class="icon-btn" id="edMusicX" title="Bỏ bài nhạc">✕</button>`
+      : Player.cur ? `<button class="btn ghost sm" id="edMusicAdd">🎵 Gắn bài đang phát: ${esc(Player.cur.name.slice(0, 40))}</button>` : '';
+    if ($('#edMusicX')) $('#edMusicX').onclick = () => { e.music = null; drawMusic(); dirty(); };
+    if ($('#edMusicAdd')) $('#edMusicAdd').onclick = () => { e.music = { id: Player.cur.id, name: Player.cur.name }; drawMusic(); dirty(); };
+  };
+  drawMusic();
   $$('#edType button').forEach((b) => (b.onclick = () => { e.type = b.dataset.t; $$('#edType button').forEach((x) => x.classList.toggle('on', x === b)); dirty(); }));
   $$('#edMood button').forEach((b) => (b.onclick = () => { const m = +b.dataset.m; e.mood = e.mood === m ? 0 : m; $$('#edMood button').forEach((x) => x.classList.toggle('on', +x.dataset.m === e.mood)); dirty(); }));
   $('#edMic').onclick = () => dictate(ta, $('#edMic'));
@@ -621,15 +776,17 @@ function openEditor(entry) {
     e.content = ta.value;
     e.date = $('#edDate').value || localISO();
     e.tags = [...new Set($('#edTags').value.split(',').map((x) => x.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))];
-    if (!e.title && !e.content.trim() && !e.photos.length && !e.links.length && !e.location) return toast('Mục trống — chưa có gì để lưu');
+    e.folderId = $('#edFolder').value;
+    e.parentId = $('#edParent').value;
+    if (!e.title && !e.content.trim() && !e.photos.length && !e.links.length && !e.location && !e.music) return toast('Mục trống — chưa có gì để lưu');
     $('#edSave').disabled = true; $('#edSave').textContent = 'Đang lưu…';
     try { await saveEntry(e); closeModal(); toast('Đã lưu ✓'); rerender(); }
     catch (err) { toast(err.message); $('#edSave').disabled = false; $('#edSave').textContent = 'Lưu'; }
   };
-  if (!isNew) $('#edDel').onclick = async () => {
-    if (!confirm('Xoá mục này và ảnh của nó? Không hoàn tác được.')) return;
-    try { await deleteEntry(e.id); closeModal(); toast('Đã xoá'); rerender(); } catch (err) { toast(err.message); }
-  };
+  if (!isNew) $('#edDel').onclick = () => confirmDelete(e.id);
+  if (opts.mic) $('#edMic').click();
+  if (opts.photo) $('#edFile')?.click();
+  if (opts.locate) $('#locHere')?.click();
 }
 
 // ============ Xem một mục ============
@@ -642,7 +799,9 @@ function openViewer(id) {
       <span class="muted">${t.icon} ${t.name} · ${fmtDate(e.date)} ${fmtTime(e.date)} · âm ${lun(e.date).text} ${lun(e.date).yearCC} (ngày ${lun(e.date).dayCC}) ${e.mood ? '· ' + MOODS[e.mood] + ' ' + MOOD_NAMES[e.mood] : ''}</span>
       <button class="icon-btn" data-close>✕</button>
     </div>
+    ${e.folderId && folderById(e.folderId) || (e.parentId && entryExists(e.parentId)) ? `<p class="crumb">${e.folderId && folderById(e.folderId) ? `📁 ${esc(folderLabel(e.folderId))}` : ''}${e.parentId && entryExists(e.parentId) ? ` ${e.folderId ? '·' : ''} ↳ thuộc <a href="#" data-open="${e.parentId}">${esc(S.entries.find((x) => x.id === e.parentId).title || 'mục mẹ')}</a>` : ''}</p>` : ''}
     ${e.title ? `<h2>${esc(e.title)}</h2>` : ''}
+    ${e.music ? `<p><a href="#" class="loc-chip" data-play="${esc(e.music.id)}" data-name="${esc(e.music.name)}">▶ 🎵 ${esc(e.music.name)}</a></p>` : ''}
     ${e.category || e.status ? `<p>${e.category ? `<span class="cat">${catIcon(e.category)} ${esc(e.category)}</span> ` : ''}${e.status ? `<span class="cat">${STATUS[e.status].join(' ')}</span>` : ''}</p>` : ''}
     ${e.type === 'link' && e.links[0] && ytId(e.links[0].url) ? `<div class="yt"><iframe src="https://www.youtube-nocookie.com/embed/${esc(ytId(e.links[0].url))}" allowfullscreen loading="lazy" title="YouTube"></iframe></div>` : ''}
     ${e.content && e.type === 'link' ? '<h4 style="margin:14px 0 4px">📝 Ghi chú của tôi</h4>' : ''}
@@ -653,12 +812,17 @@ function openViewer(id) {
     ${e.location ? `<p style="margin-top:12px">📍 ${esc(e.location.name)} · <a href="https://www.google.com/maps?q=${e.location.lat},${e.location.lng}" target="_blank" rel="noopener">Mở Google Maps</a></p><div class="mini-map" id="miniMap"></div>` : ''}
     <div style="margin-top:10px">${e.tags.map((x) => `<span class="tag">#${esc(x)}</span>`).join(' ')}</div>
     <div id="aiBox">${e.ai ? `<div class="ai-box"><h4>✨ Góc nhìn của trợ lý</h4><div class="md">${md(e.ai)}</div></div>` : ''}</div>
+    ${childrenOf(e.id).length ? `<div class="kids-box"><h4>🧩 Mục con (${childrenOf(e.id).length})</h4>${childrenOf(e.id).map(entryRow).join('')}</div>` : ''}
     <div class="sheet-foot">
-      <button class="btn primary" id="vEdit">Sửa</button>
-      <button class="btn ghost" id="vAI">✨ ${e.ai ? 'Hỏi AI lại' : 'AI phản hồi & rút bài học'}</button>
+      <button class="btn primary" id="vEdit">✏️ Sửa</button>
+      <button class="btn ghost" id="vChild">＋ Mục con</button>
+      <button class="btn ghost" id="vAI">✨ ${e.ai ? 'Hỏi AI lại' : 'AI phản hồi'}</button>
       <span class="grow"></span>
-      <button class="btn ghost" data-close>Đóng</button>
+      <button class="btn danger" id="vDel" title="Xoá mục này">🗑</button>
     </div>`);
+  $('#vDel').onclick = () => confirmDelete(e.id);
+  $('#vChild').onclick = () => openEditor(newEntry({ parentId: e.id, folderId: e.folderId || '' }));
+  $$('.kids-box .trow').forEach((r) => (r.onclick = () => openViewer(r.dataset.id)));
   $$('.v-photos img').forEach((im) => (im.onclick = () => lightbox(im.dataset.full, e.title)));
   $('#vEdit').onclick = () => (e.type === 'link' && e.links.length ? openLinkEditor({ entry: e }) : openEditor(e));
   if (e.location) loadLeaflet().then(() => {
@@ -695,13 +859,13 @@ function entryText(e, max = 1200) {
   const t = TYPES[e.type]?.name || e.type;
   const meta = [e.mood ? `tâm trạng ${e.mood}/5` : '', e.location ? '@ ' + shortPlace(e.location.name) : '', e.tags.length ? e.tags.map((x) => '#' + x).join(' ') : '', e.photos.length ? `${e.photos.length} ảnh` : ''].filter(Boolean).join(' | ');
   const links = (e.links.length ? '\nLink: ' + e.links.map((l) => `${l.title}${l.author ? ' - ' + l.author : ''} (${l.url})`).join('; ') : '') +
-    (e.category ? '\nChủ đề: ' + e.category : '') + (e.summary ? '\nTóm tắt link: ' + plain(e.summary).slice(0, 800) : '');
+    (e.category ? '\nChủ đề: ' + e.category : '') + (e.folderId && folderById(e.folderId) ? '\nThư mục: ' + folderLabel(e.folderId) : '') + (e.summary ? '\nTóm tắt link: ' + plain(e.summary).slice(0, 800) : '');
   const c = e.content.length > max ? e.content.slice(0, max) + '…' : e.content;
   return `[${e.date.replace('T', ' ')} | âm ${lun(e.date).text}] (${t}) ${e.title || ''}${meta ? ' | ' + meta : ''}\n${c}${links}`;
 }
 async function aiFetch(body) {
   const r = await fetch('/api/ai', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: S.settings.model || undefined, ...body }) });
-  if (r.status === 401) { showLogin(); throw new Error('Chưa đăng nhập'); }
+  if (r.status === 401) { showLogin(); throw new Error('Chưa đăng nhập hoặc app đang khoá'); }
   if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'AI lỗi ' + r.status); }
   return r;
 }
@@ -717,6 +881,361 @@ async function aiJSON({ system, messages }) {
   const txt = await r.text();
   try { return JSON.parse(txt); } catch { const m = txt.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error('AI trả về dữ liệu không đọc được'); }
 }
+
+// ============ Hộp xác nhận / nhập chữ riêng (không dùng confirm() của trình duyệt vì Zalo, Messenger… hay chặn) ============
+function askConfirm(msg, okText = 'Đồng ý', danger = true) {
+  return new Promise((res) => {
+    const w = document.createElement('div');
+    w.className = 'confirm-wrap';
+    w.innerHTML = `<div class="confirm-box"><p>${msg}</p><div class="row gap" style="justify-content:flex-end"><button class="btn ghost" data-v="0">Huỷ</button><button class="btn ${danger ? 'danger-fill' : 'primary'}" data-v="1">${okText}</button></div></div>`;
+    document.body.appendChild(w);
+    w.addEventListener('click', (ev) => { const b = ev.target.closest('[data-v]'); if (b || ev.target === w) { w.remove(); res(b?.dataset.v === '1'); } });
+  });
+}
+function askText(title, value = '', okText = 'Lưu') {
+  return new Promise((res) => {
+    const w = document.createElement('div');
+    w.className = 'confirm-wrap';
+    w.innerHTML = `<form class="confirm-box"><p><b>${title}</b></p><input id="askIn" value="${esc(value)}" maxlength="80" autocomplete="off"><div class="row gap" style="justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" data-v="0">Huỷ</button><button type="submit" class="btn primary">${okText}</button></div></form>`;
+    document.body.appendChild(w);
+    const inp = w.querySelector('#askIn'); setTimeout(() => { inp.focus(); inp.select(); }, 30);
+    const done = (v) => { w.remove(); res(v); };
+    w.querySelector('form').onsubmit = (ev) => { ev.preventDefault(); done(inp.value.trim() || null); };
+    w.addEventListener('click', (ev) => { if (ev.target === w || ev.target.closest('[data-v="0"]')) done(null); });
+  });
+}
+
+// ============ Thư mục (mẹ – con) & nhật ký con ============
+const saveFolders = () => kvSet('folders', S.folders).catch((e) => toast(e.message));
+const folderById = (id) => S.folders.find((f) => f.id === id);
+const byName = (a, b) => a.name.localeCompare(b.name, 'vi');
+function folderPath(id) {
+  const out = []; let f = folderById(id), guard = 0;
+  while (f && guard++ < 30) { out.unshift(f); f = folderById(f.parentId); }
+  return out;
+}
+const folderLabel = (id) => folderPath(id).map((f) => f.name).join(' / ');
+const subFolders = (pid) => S.folders.filter((f) => (f.parentId || '') === (pid || '')).sort(byName);
+function folderOptions(sel = '', excludeId = '') {
+  const out = ['<option value="">— Không thư mục —</option>'];
+  const walk = (pid, d) => subFolders(pid).forEach((f) => {
+    if (f.id === excludeId) return;
+    out.push(`<option value="${f.id}" ${f.id === sel ? 'selected' : ''}>${'   '.repeat(d)}📁 ${esc(f.name)}</option>`);
+    walk(f.id, d + 1);
+  });
+  walk('', 0);
+  return out.join('');
+}
+async function createFolder(parentId = '') {
+  const name = await askText(parentId ? `Thư mục con trong “${esc(folderById(parentId)?.name || '')}”` : 'Tên thư mục mới', '', 'Tạo');
+  if (!name) return null;
+  const f = { id: 'f' + uid(), name, parentId: parentId || '' };
+  S.folders.push(f);
+  await saveFolders();
+  return f;
+}
+async function renameFolder(id) {
+  const f = folderById(id); if (!f) return;
+  const name = await askText('Đổi tên thư mục', f.name);
+  if (!name) return;
+  f.name = name; await saveFolders(); rerender();
+}
+async function moveFolder(id) {
+  const f = folderById(id); if (!f) return;
+  openModal(`<div class="sheet-head"><h3>Chuyển “${esc(f.name)}” vào…</h3><button class="icon-btn" data-close>✕</button></div>
+    <select id="mvSel">${folderOptions(f.parentId, f.id).replace('— Không thư mục —', '— Cấp ngoài cùng —')}</select>
+    <div class="sheet-foot"><button class="btn primary" id="mvOk">Chuyển</button><button class="btn ghost" data-close>Huỷ</button></div>`);
+  $('#mvOk').onclick = async () => { f.parentId = $('#mvSel').value; await saveFolders(); closeModal(); rerender(); };
+}
+async function deleteFolder(id) {
+  const f = folderById(id); if (!f) return;
+  const n = S.entries.filter((e) => e.folderId === id).length, k = subFolders(id).length;
+  if (!(await askConfirm(`Xoá thư mục <b>${esc(f.name)}</b>?<br><br>${n || k ? `${n} mục và ${k} thư mục con bên trong sẽ được <b>chuyển lên thư mục cha</b> — không mất dữ liệu.` : 'Thư mục đang trống.'}`, '🗑 Xoá thư mục'))) return;
+  S.folders.forEach((x) => { if (x.parentId === id) x.parentId = f.parentId || ''; });
+  S.folders = S.folders.filter((x) => x.id !== id);
+  await saveFolders();
+  for (const e of S.entries.filter((e) => e.folderId === id)) { e.folderId = f.parentId || ''; await saveEntry(e); }
+  toast('Đã xoá thư mục'); rerender();
+}
+function folderMenu(id) {
+  const f = folderById(id); if (!f) return;
+  openModal(`<div class="sheet-head"><h3>📁 ${esc(f.name)}</h3><button class="icon-btn" data-close>✕</button></div>
+    <p class="muted small">${esc(folderLabel(id))}</p>
+    <div class="menu-list">
+      <button data-a="write">✏️ Viết mục mới vào đây</button>
+      <button data-a="sub">📁 Tạo thư mục con</button>
+      <button data-a="rename">🏷️ Đổi tên</button>
+      <button data-a="move">📦 Chuyển vào thư mục khác</button>
+      <button data-a="del" class="danger-text">🗑 Xoá thư mục</button>
+    </div>`);
+  $$('.menu-list button').forEach((b) => (b.onclick = async () => {
+    const a = b.dataset.a; closeModal();
+    if (a === 'write') openEditor(newEntry({ folderId: id }));
+    if (a === 'sub') { const nf = await createFolder(id); if (nf) { openFolders.add(id); saveOpen(); rerender(); } }
+    if (a === 'rename') renameFolder(id);
+    if (a === 'move') moveFolder(id);
+    if (a === 'del') deleteFolder(id);
+  }));
+}
+
+const entryExists = (id) => S.entries.some((x) => x.id === id);
+const childrenOf = (id) => S.entries.filter((e) => e.parentId === id).sort((a, b) => a.date.localeCompare(b.date));
+function descendantIds(id, acc = new Set()) { for (const c of childrenOf(id)) if (!acc.has(c.id)) { acc.add(c.id); descendantIds(c.id, acc); } return acc; }
+function parentOptions(e) {
+  const bad = descendantIds(e.id); bad.add(e.id);
+  const list = S.entries.filter((x) => !bad.has(x.id) && x.type !== 'link').slice(0, 300);
+  if (e.parentId && !list.some((x) => x.id === e.parentId) && entryExists(e.parentId)) list.unshift(S.entries.find((x) => x.id === e.parentId));
+  return '<option value="">— Không (mục độc lập) —</option>' + list.map((x) =>
+    `<option value="${x.id}" ${x.id === e.parentId ? 'selected' : ''}>${TYPES[x.type]?.icon || ''} ${esc((x.title || plain(x.content).slice(0, 40) || 'Không tiêu đề').slice(0, 60))} · ${x.date.slice(0, 10).split('-').reverse().join('/')}</option>`).join('');
+}
+
+// Xoá một mục (dùng chung cho màn xem, trình soạn và kho link)
+async function confirmDelete(id) {
+  const e = S.entries.find((x) => x.id === id);
+  if (!e) return false;
+  const kids = childrenOf(id);
+  const ok = await askConfirm(`Xoá <b>${esc(e.title || plain(e.content).slice(0, 50) || 'mục này')}</b>${e.photos.length ? ' cùng ảnh của nó' : ''}? Không hoàn tác được.${kids.length ? `<br><br>${kids.length} mục con sẽ được giữ lại và trở thành mục độc lập.` : ''}`, '🗑 Xoá');
+  if (!ok) return false;
+  try {
+    await deleteEntry(id);
+    for (const k of kids) { k.parentId = ''; await saveEntry(k); }
+    closeModal(); toast('Đã xoá'); rerender();
+    return true;
+  } catch (err) { toast('Không xoá được: ' + err.message, 4000); return false; }
+}
+
+// ----- Chế độ xem theo thư mục -----
+const openFolders = new Set((() => { try { return JSON.parse(localStorage.getItem('nk_open') || '[]'); } catch { return []; } })());
+const saveOpen = () => { try { localStorage.setItem('nk_open', JSON.stringify([...openFolders])); } catch {} };
+function entryRow(e) {
+  const t = TYPES[e.type] || TYPES.ghichu, kids = childrenOf(e.id).length;
+  const sub = plain(e.content).slice(0, 90) || (e.links[0] ? e.links[0].title || e.links[0].url : '');
+  return `<div class="trow" data-id="${e.id}"><span class="ticon">${t.icon}</span>
+    <div class="tmain"><div class="ttitle">${esc(e.title || sub || 'Không tiêu đề')}</div>
+    <div class="tsub">${fmtDate(e.date)} · âm ${lun(e.date).text}${e.mood ? ' · ' + MOODS[e.mood] : ''}${e.photos.length ? ' · 🖼️' + e.photos.length : ''}${kids ? ` · 🧩 ${kids} mục con` : ''}${e.music ? ' · 🎵' : ''}</div></div></div>`;
+}
+function renderFolderView(list) {
+  const filtering = !!(S.filter.q || S.filter.type || S.filter.tag);
+  const inList = new Set(list.map((e) => e.id));
+  const fid = (e) => (e.folderId && folderById(e.folderId) ? e.folderId : '');
+  const isTop = (e) => !(e.parentId && inList.has(e.parentId));
+  const topIn = (f) => list.filter((e) => fid(e) === f && isTop(e));
+  const countIn = (f) => list.filter((e) => fid(e) === f).length + subFolders(f).reduce((s, x) => s + countIn(x.id), 0);
+  const tree = (e, depth = 0) => {
+    const kids = childrenOf(e.id).filter((k) => inList.has(k.id));
+    return `<div class="tnode">${entryRow(e)}${kids.length && depth < 8 ? `<div class="tkids">${kids.map((k) => tree(k, depth + 1)).join('')}</div>` : ''}</div>`;
+  };
+  const node = (f) => {
+    const c = countIn(f.id);
+    if (filtering && !c) return '';
+    const open = filtering || openFolders.has(f.id);
+    const subs = subFolders(f.id), ents = topIn(f.id);
+    return `<div class="fnode"><div class="frow" data-f="${f.id}"><span class="ftog">${open ? '▾' : '▸'}</span><span class="fname">📁 ${esc(f.name)}</span><span class="n">${c}</span><span class="grow"></span>
+      <button class="icon-btn" data-fadd="${f.id}" title="Viết vào thư mục này">＋</button><button class="icon-btn" data-fmenu="${f.id}" title="Tuỳ chọn">⋯</button></div>
+      ${open ? `<div class="fkids">${subs.map(node).join('')}${ents.map((e) => tree(e)).join('')}${!subs.length && !ents.length ? '<p class="muted small fempty">Thư mục trống — bấm ＋ để viết vào đây</p>' : ''}</div>` : ''}</div>`;
+  };
+  const loose = topIn('');
+  $('#timeline').innerHTML = `<div class="row gap wrap" style="margin:6px 0 10px"><button class="btn ghost sm" id="fNew">＋ Thư mục mới</button>
+      <button class="btn ghost sm" id="fOpenAll">Mở hết</button><button class="btn ghost sm" id="fCloseAll">Thu gọn</button></div>
+    <div class="ftree">${subFolders('').map(node).join('') || (filtering ? '' : '<p class="muted small">Chưa có thư mục nào. Bấm “＋ Thư mục mới” để tạo, ví dụ: Công việc, Gia đình, Học tập…</p>')}
+    ${loose.length ? `<div class="fnode"><div class="frow loose"><span class="fname">🗂️ Chưa xếp vào thư mục</span><span class="n">${loose.length}</span></div><div class="fkids">${loose.map((e) => tree(e)).join('')}</div></div>` : ''}</div>`;
+  $('#fNew').onclick = async () => { if (await createFolder()) rerender(); };
+  $('#fOpenAll').onclick = () => { S.folders.forEach((f) => openFolders.add(f.id)); saveOpen(); rerender(); };
+  $('#fCloseAll').onclick = () => { openFolders.clear(); saveOpen(); rerender(); };
+}
+$('#timeline').addEventListener('click', (ev) => {
+  const add = ev.target.closest('[data-fadd]'); if (add) return openEditor(newEntry({ folderId: add.dataset.fadd }));
+  const menu = ev.target.closest('[data-fmenu]'); if (menu) return folderMenu(menu.dataset.fmenu);
+  const fr = ev.target.closest('.frow[data-f]');
+  if (fr) { const id = fr.dataset.f; openFolders.has(id) ? openFolders.delete(id) : openFolders.add(id); saveOpen(); return rerender(); }
+  const tr = ev.target.closest('.trow'); if (tr) return openViewer(tr.dataset.id);
+  const a = ev.target.closest('.entry'); if (a) openViewer(a.dataset.id);
+});
+
+// ============ Trình phát nhạc (file âm thanh trong Google Drive) ============
+const Player = {
+  list: [], at: 0, loaded: false, queue: [], idx: -1, cur: null, audio: new Audio(), url: null,
+  shuffle: false, repeat: 'all', folder: '', q: '', loading: 0,
+  async loadCache() {
+    if (this.loaded) return;
+    const c = await kvGet('music').catch(() => null);
+    if (c) { this.list = c.list || []; this.at = c.at || 0; this.shuffle = !!c.shuffle; this.repeat = c.repeat || 'all'; }
+    this.loaded = true;
+  },
+  saveCache() { return kvSet('music', { list: this.list, at: this.at, shuffle: this.shuffle, repeat: this.repeat }).catch(() => {}); },
+  async scan() {
+    await Drive.auth(true);
+    const files = []; let pt = '';
+    do {
+      const d = await Drive.g('files?pageSize=1000&fields=nextPageToken,files(id,name,mimeType,size,parents)&q=' + encodeURIComponent("trashed=false and mimeType contains 'audio/'") + (pt ? '&pageToken=' + pt : ''));
+      files.push(...(d.files || [])); pt = d.nextPageToken;
+    } while (pt && files.length < 5000);
+    const pids = [...new Set(files.map((f) => f.parents?.[0]).filter(Boolean))].slice(0, 300);
+    const names = {};
+    for (let i = 0; i < pids.length; i += 10) {
+      await Promise.all(pids.slice(i, i + 10).map(async (id) => { try { names[id] = (await Drive.g(`files/${id}?fields=name`)).name; } catch { names[id] = 'Thư mục khác'; } }));
+    }
+    this.list = files.map((f) => ({ id: f.id, name: f.name.replace(/\.(mp3|m4a|aac|wav|ogg|flac|opus|wma)$/i, ''), size: +f.size || 0, folder: names[f.parents?.[0]] || 'Drive của tôi' }))
+      .sort((a, b) => a.folder.localeCompare(b.folder, 'vi') || a.name.localeCompare(b.name, 'vi'));
+    this.at = Date.now();
+    await this.saveCache();
+  },
+  filtered() {
+    const q = this.q.toLowerCase();
+    return this.list.filter((t) => (!this.folder || t.folder === this.folder) && (!q || (t.name + ' ' + t.folder).toLowerCase().includes(q)));
+  },
+  playList(list, i = 0) { this.queue = list.slice(); this.play(i); },
+  async play(i) {
+    const t = this.queue[i]; if (!t) return;
+    this.idx = i; this.cur = t;
+    const my = ++this.loading;
+    this.show(); this.ui('Đang tải bài…');
+    try {
+      await Drive.auth(true);
+      const r = await Drive.g(`files/${t.id}?alt=media`, { raw: true });
+      const blob = await r.blob();
+      if (my !== this.loading) return; // đã bấm bài khác
+      if (this.url) URL.revokeObjectURL(this.url);
+      this.url = URL.createObjectURL(blob);
+      this.audio.src = this.url;
+      await this.audio.play();
+      this.ui();
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({ title: t.name, artist: t.folder, album: 'Nhật Ký Riêng', artwork: [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }] });
+      }
+    } catch (e) {
+      if (my !== this.loading) return;
+      this.ui('⚠️ ' + (/popup|đóng cửa sổ|hết hạn/i.test(e.message) ? 'Cần kết nối lại Google — bấm ▶ lần nữa' : e.message));
+    }
+    if (S.view === 'music') RENDER.music();
+  },
+  toggle() {
+    if (!this.cur) return;
+    if (!this.audio.src) return this.play(this.idx);
+    this.audio.paused ? this.audio.play().catch(() => this.play(this.idx)) : this.audio.pause();
+  },
+  next(auto) {
+    if (!this.queue.length) return;
+    if (auto && this.repeat === 'one') { this.audio.currentTime = 0; return this.audio.play(); }
+    let i;
+    if (this.shuffle && this.queue.length > 1) { do { i = Math.floor(Math.random() * this.queue.length); } while (i === this.idx); }
+    else i = this.idx + 1;
+    if (i >= this.queue.length) { if (auto && this.repeat === 'off') return this.ui(); i = 0; }
+    this.play(i);
+  },
+  prev() {
+    if (this.audio.currentTime > 5) { this.audio.currentTime = 0; return; }
+    this.play((this.idx - 1 + this.queue.length) % this.queue.length);
+  },
+  show() { $('#player').classList.remove('hidden'); document.body.classList.add('has-player'); },
+  close() { this.audio.pause(); this.loading++; $('#player').classList.add('hidden'); document.body.classList.remove('has-player'); },
+  ui(msg) {
+    if (!this.cur) return;
+    $('#plTitle').textContent = this.cur.name;
+    $('#plSub').textContent = msg || `${this.cur.folder}${this.shuffle ? ' · 🔀' : ''}${this.repeat === 'one' ? ' · 🔂' : this.repeat === 'off' ? '' : ' · 🔁'}`;
+    $('#plPlay').textContent = this.audio.paused ? '▶' : '⏸';
+  },
+  menu() {
+    openModal(`<div class="sheet-head"><h3>🎵 ${esc(this.cur?.name || 'Trình phát')}</h3><button class="icon-btn" data-close>✕</button></div>
+      <div class="menu-list">
+        <button data-a="shuffle">🔀 Trộn bài: <b>${this.shuffle ? 'Bật' : 'Tắt'}</b></button>
+        <button data-a="repeat">🔁 Lặp lại: <b>${{ all: 'Cả danh sách', one: 'Một bài', off: 'Không lặp' }[this.repeat]}</b></button>
+        <button data-a="note">📝 Ghi nhật ký kèm bài này</button>
+        <button data-a="list">📃 Mở danh sách nhạc</button>
+        <button data-a="close" class="danger-text">⏹ Tắt trình phát</button>
+      </div>`);
+    $$('.menu-list button').forEach((b) => (b.onclick = () => {
+      const a = b.dataset.a;
+      if (a === 'shuffle') { this.shuffle = !this.shuffle; this.saveCache(); this.ui(); return this.menu(); }
+      if (a === 'repeat') { this.repeat = { all: 'one', one: 'off', off: 'all' }[this.repeat]; this.saveCache(); this.ui(); return this.menu(); }
+      closeModal();
+      if (a === 'note' && this.cur) openEditor(newEntry({ music: { id: this.cur.id, name: this.cur.name } }));
+      if (a === 'list') go('music');
+      if (a === 'close') this.close();
+    }));
+  },
+  playById(id, name) {
+    const i = this.list.findIndex((t) => t.id === id);
+    if (i >= 0) this.playList(this.list.filter((t) => t.folder === this.list[i].folder), this.list.filter((t) => t.folder === this.list[i].folder).findIndex((t) => t.id === id));
+    else this.playList([{ id, name, folder: 'Nhật ký' }], 0);
+  },
+};
+Player.audio.preload = 'auto';
+Player.audio.addEventListener('ended', () => Player.next(true));
+Player.audio.addEventListener('play', () => Player.ui());
+Player.audio.addEventListener('pause', () => Player.ui());
+Player.audio.addEventListener('timeupdate', () => {
+  const a = Player.audio; if (!a.duration) return;
+  $('#plProg').style.width = (a.currentTime / a.duration) * 100 + '%';
+});
+if ('mediaSession' in navigator) {
+  const ms = navigator.mediaSession;
+  ms.setActionHandler('play', () => Player.toggle());
+  ms.setActionHandler('pause', () => Player.toggle());
+  ms.setActionHandler('previoustrack', () => Player.prev());
+  ms.setActionHandler('nexttrack', () => Player.next());
+}
+$('#plPlay').addEventListener('click', () => Player.toggle());
+$('#plNext').addEventListener('click', () => Player.next());
+$('#plPrev').addEventListener('click', () => Player.prev());
+$('#plMore').addEventListener('click', () => Player.menu());
+$('#plBar').addEventListener('click', (ev) => {
+  const a = Player.audio; if (!a.duration) return;
+  const r = ev.currentTarget.getBoundingClientRect();
+  a.currentTime = ((ev.clientX - r.left) / r.width) * a.duration;
+});
+const fmtSize = (b) => (b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB');
+
+RENDER.music = async function () {
+  await Player.loadCache();
+  const box = $('#music');
+  if (!Drive.clientId()) {
+    box.innerHTML = '<div class="card"><p>Trình phát dùng nhạc trong <b>Google Drive</b> của bạn. Hãy kết nối Google Drive trước ở <a href="#settings">Cài đặt → Google Drive</a>.</p></div>';
+    return;
+  }
+  if (!Player.list.length) {
+    box.innerHTML = `<div class="card"><h3>🎵 Nghe nhạc từ Google Drive</h3>
+      <p class="small">App sẽ tìm tất cả file âm thanh (MP3, M4A, WAV…) trong Drive của bạn và phát ngay trong app, kể cả khi đang viết nhật ký.</p>
+      <p class="muted small">Google sẽ hỏi thêm quyền <b>“Xem các tệp trên Google Drive”</b> (chỉ đọc) — cần quyền này để thấy nhạc bạn đã tải lên trước đây. App không sửa hay xoá file nhạc nào.</p>
+      <button class="btn primary" id="muScan">🔗 Kết nối & tìm nhạc trên Drive</button> <span class="muted small" id="muMsg"></span></div>`;
+    $('#muScan').onclick = async () => {
+      $('#muScan').disabled = true; $('#muMsg').textContent = 'Đang tìm nhạc…';
+      try { await Player.scan(); toast(`Tìm thấy ${Player.list.length} bài`); RENDER.music(); }
+      catch (e) { $('#muMsg').textContent = '⚠️ ' + e.message; $('#muScan').disabled = false; }
+    };
+    return;
+  }
+  const folders = {};
+  Player.list.forEach((t) => (folders[t.folder] = (folders[t.folder] || 0) + 1));
+  const list = Player.filtered();
+  box.innerHTML = `
+    <div class="filters">
+      <input type="search" id="muSearch" placeholder="Tìm bài hát…" value="${esc(Player.q)}">
+      <div class="chips" id="muFolders"><button data-f="" class="${!Player.folder ? 'on' : ''}">Tất cả<span class="n">${Player.list.length}</span></button>
+        ${Object.entries(folders).map(([f, n]) => `<button data-f="${esc(f)}" class="${Player.folder === f ? 'on' : ''}">📁 ${esc(f)}<span class="n">${n}</span></button>`).join('')}</div>
+    </div>
+    <div class="row gap wrap" style="margin:8px 0 12px">
+      <button class="btn primary sm" id="muAll">▶ Phát ${list.length} bài</button>
+      <button class="btn ghost sm" id="muShuffle">🔀 Phát trộn</button>
+      <span class="grow"></span>
+      <button class="btn ghost sm" id="muRescan">🔄 Quét lại Drive</button>
+    </div>
+    <p class="muted small">Cập nhật danh sách: ${new Date(Player.at).toLocaleString('vi-VN')}. Có bài mới trên Drive thì bấm “Quét lại”.</p>
+    <div class="tracks">${list.map((t, i) => `<div class="track ${Player.cur?.id === t.id ? 'on' : ''}" data-i="${i}">
+      <span class="tk-ic">${Player.cur?.id === t.id ? (Player.audio.paused ? '⏸' : '🔊') : '▶'}</span>
+      <div class="tk-main"><div class="tk-name">${esc(t.name)}</div><div class="tk-sub">${esc(t.folder)} · ${fmtSize(t.size)}</div></div></div>`).join('') || '<p class="empty">Không có bài nào khớp.</p>'}</div>`;
+  $('#muSearch').addEventListener('input', debounce((ev) => { Player.q = ev.target.value.trim(); RENDER.music().then(() => { const s = $('#muSearch'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }); }, 250));
+  $$('#muFolders button').forEach((b) => (b.onclick = () => { Player.folder = b.dataset.f; RENDER.music(); }));
+  $('#muAll').onclick = () => { Player.shuffle = false; Player.playList(list, 0); };
+  $('#muShuffle').onclick = () => { Player.shuffle = true; Player.saveCache(); Player.playList(list, Math.floor(Math.random() * list.length)); };
+  $('#muRescan').onclick = async () => { $('#muRescan').disabled = true; $('#muRescan').textContent = 'Đang quét…'; try { await Player.scan(); toast(`${Player.list.length} bài`); } catch (e) { toast(e.message, 4000); } RENDER.music(); };
+  $$('.track').forEach((el) => (el.onclick = () => {
+    const i = +el.dataset.i;
+    if (Player.cur?.id === list[i].id && Player.audio.src) return Player.toggle();
+    Player.playList(list, i);
+  }));
+};
+document.addEventListener('click', (ev) => { const a = ev.target.closest('[data-play]'); if (a) { ev.preventDefault(); Player.playById(a.dataset.play, a.dataset.name); } });
 
 // ============ Kho link ============
 const LINK_CATS = [
@@ -789,6 +1308,8 @@ function openLinkEditor({ entry, url = '', note = '', title = '' } = {}) {
     <div class="chips le-status" id="leStatus">${Object.entries(STATUS).map(([k, [i, n]]) => `<button data-s="${k}">${i} ${n}</button>`).join('')}</div>
     <label class="lbl">Thẻ</label>
     <input id="leTags" value="${esc(e.tags.join(', '))}" placeholder="vd: vũ trụ, dạy con">
+    <label class="lbl">📁 Thư mục</label>
+    <select id="leFolder">${folderOptions(e.folderId)}</select>
     <label class="lbl">Ngày lưu</label>
     <input type="datetime-local" id="leDate" value="${esc(e.date)}" style="max-width:220px">
     <div class="sheet-foot">
@@ -799,7 +1320,7 @@ function openLinkEditor({ entry, url = '', note = '', title = '' } = {}) {
     </div>`);
   const sheet = $('#sheet');
   sheet.addEventListener('input', () => sheet.setAttribute('data-dirty', '1'));
-  $('#leClose').onclick = () => { if (!sheet.hasAttribute('data-dirty') || confirm('Bỏ các thay đổi chưa lưu?')) closeModal(); };
+  $('#leClose').onclick = async () => { if (!sheet.hasAttribute('data-dirty') || (await askConfirm('Bỏ các thay đổi chưa lưu?', 'Bỏ thay đổi'))) closeModal(); };
   let userPicked = !!e.category;
   const drawCats = () => {
     $('#leCats').innerHTML = allCats().map((c) => `<button data-c="${esc(c)}" class="${e.category === c ? 'on' : ''}">${catIcon(c)} ${esc(c)}</button>`).join('');
@@ -853,15 +1374,13 @@ function openLinkEditor({ entry, url = '', note = '', title = '' } = {}) {
     e.title = $('#leTitle').value.trim() || meta.title || '';
     e.content = $('#leNote').value;
     e.date = $('#leDate').value || localISO();
+    e.folderId = $('#leFolder').value;
     e.tags = [...new Set($('#leTags').value.split(',').map((x) => x.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))];
     $('#leSave').disabled = true;
     try { await saveEntry(e); closeModal(); toast('Đã lưu link ✓'); rerender(); }
     catch (err) { toast(err.message); $('#leSave').disabled = false; }
   };
-  if (!isNew) $('#leDel').onclick = async () => {
-    if (!confirm('Xoá link này?')) return;
-    await deleteEntry(e.id); closeModal(); toast('Đã xoá'); rerender();
-  };
+  if (!isNew) $('#leDel').onclick = () => confirmDelete(e.id);
   (async () => {
     if (url && !e.links.length) await fetchMeta();
     if (isNew && url && !e.category && autoCat()) suggest(true);
@@ -1312,7 +1831,7 @@ async function ask(q, range = 'all') {
 $('#chatForm').addEventListener('submit', (ev) => { ev.preventDefault(); const q = $('#chatText').value; $('#chatText').value = ''; ask(q); });
 $('#chatText').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); $('#chatForm').requestSubmit(); } });
 $('#chatText').addEventListener('input', (ev) => { ev.target.style.height = 'auto'; ev.target.style.height = ev.target.scrollHeight + 'px'; });
-$('#chatClear').addEventListener('click', () => { if (confirm('Xoá toàn bộ hội thoại với trợ lý?')) { chat = []; kvSet('chat', []); drawChat(); } });
+$('#chatClear').addEventListener('click', async () => { if (await askConfirm('Xoá toàn bộ hội thoại với trợ lý?', 'Xoá')) { chat = []; kvSet('chat', []); drawChat(); } });
 
 // ============ Thống kê ============
 RENDER.stats = function () {
@@ -1399,15 +1918,24 @@ const Drive = {
     if (window.google?.accounts?.oauth2) return Promise.resolve();
     return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.onload = ok; s.onerror = () => no(new Error('Không tải được Google Sign-In')); document.head.appendChild(s); });
   },
-  async auth() {
-    if (this.token && Date.now() < this.exp - 60000) return this.token;
+  scopes: [],
+  async auth(needRead) {
+    const FILE = 'https://www.googleapis.com/auth/drive.file', READ = 'https://www.googleapis.com/auth/drive.readonly';
+    const want = needRead ? [FILE, READ] : [FILE];
+    if (this.token && Date.now() < this.exp - 60000 && want.every((x) => this.scopes.includes(x))) return this.token;
     if (!this.clientId()) throw new Error('Chưa có Google Client ID — xem mục “Google Client ID” bên dưới.');
     await this.loadGis();
     return new Promise((ok, no) => {
       const tc = google.accounts.oauth2.initTokenClient({
         client_id: this.clientId(),
-        scope: 'https://www.googleapis.com/auth/drive.file',
-        callback: (r) => { if (r.error) return no(new Error(r.error_description || r.error)); this.token = r.access_token; this.exp = Date.now() + r.expires_in * 1000; ok(this.token); },
+        scope: want.join(' '),
+        include_granted_scopes: true,
+        callback: (r) => {
+          if (r.error) return no(new Error(r.error_description || r.error));
+          this.token = r.access_token; this.exp = Date.now() + r.expires_in * 1000; this.scopes = (r.scope || '').split(' ');
+          if (!want.every((x) => this.scopes.includes(x))) return no(new Error('Bạn chưa tích ô cho phép xem file trên Drive — hãy thử lại và tích chọn quyền đó.'));
+          ok(this.token);
+        },
         error_callback: (e) => no(new Error(e.type === 'popup_closed' ? 'Bạn đã đóng cửa sổ đăng nhập Google' : e.message || 'Lỗi đăng nhập Google')),
       });
       tc.requestAccessToken({ prompt: '' });
@@ -1460,7 +1988,7 @@ const Drive = {
       const m = this.map;
       // 1) File dữ liệu đầy đủ
       this.status('⏳ Đang lưu dữ liệu…');
-      const data = { app: 'nhat-ky-rieng', version: 1, exportedAt: new Date().toISOString(), entries: S.entries };
+      const data = { app: 'nhat-ky-rieng', version: 2, exportedAt: new Date().toISOString(), folders: S.folders, entries: S.entries };
       await this.put('nhat-ky-data.json', m.root, new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }), 'application/json');
       // 2) Markdown theo tháng (chỉ tháng có thay đổi)
       const months = {};
@@ -1494,7 +2022,7 @@ const Drive = {
   },
   autoSync: debounce(() => { if (S.settings.driveAuto) Drive.sync(false); }, 4000),
   async restore() {
-    if (!confirm('Lấy dữ liệu từ Drive và gộp vào app? (Mục nào mới hơn sẽ được giữ, không mất dữ liệu hiện có)')) return;
+    if (!(await askConfirm('Lấy dữ liệu từ Drive và gộp vào app? Mục nào mới hơn sẽ được giữ, không mất dữ liệu hiện có.', 'Khôi phục', false))) return;
     try {
       await this.auth(); await this.loadMap();
       this.status('⏳ Đang tìm dữ liệu trên Drive…');
@@ -1504,6 +2032,7 @@ const Drive = {
       if (!fid) throw new Error('Không thấy file nhat-ky-data.json');
       const data = await (await this.g(`files/${fid}?alt=media`, { raw: true })).json();
       const r = await api('/api/entries', { method: 'POST', body: { entries: data.entries || [] } });
+      if (Array.isArray(data.folders)) { data.folders.forEach((f) => { if (!folderById(f.id)) S.folders.push(f); }); await saveFolders(); }
       // Ảnh thiếu trên máy chủ
       const photoDir = await this.find('Ảnh', root, true);
       let fixed = 0;
@@ -1547,6 +2076,9 @@ function monthMarkdown(mo, list) {
     lines.push('', e.content || '');
     if (e.links.length) lines.push('', ...e.links.map((l) => `- 🔗 [${l.title || l.url}](${l.url})`));
     if (e.photos.length) lines.push('', `🖼️ Ảnh: ${e.photos.map((p) => (typeof p === 'string' ? p : p.id) + '.jpg').join(', ')} (trong thư mục Ảnh)`);
+    if (e.folderId && folderById(e.folderId)) lines.push('', `📁 Thư mục: ${folderLabel(e.folderId)}`);
+    if (e.parentId && entryExists(e.parentId)) lines.push(`↳ Mục con của: ${S.entries.find((x) => x.id === e.parentId).title || '(không tiêu đề)'}`);
+    if (e.music) lines.push(`🎵 Nhạc: ${e.music.name}`);
     if (e.category) lines.push('', `Chủ đề: ${e.category}`);
     if (e.summary) lines.push('', '**Link này nói gì:**', '', e.summary);
     if (e.ai) lines.push('', '> ✨ ' + e.ai.replace(/\n/g, '\n> '));
@@ -1558,7 +2090,7 @@ $('#driveSync').addEventListener('click', () => Drive.sync(true));
 $('#driveRestore').addEventListener('click', async () => { await Drive.restore(); });
 
 // ============ Cài đặt ============
-RENDER.settings = function () { fillSettings(); updateInstallCard(); Drive.showStatus(); if (Drive.clientId()) Drive.loadGis().catch(() => {}); };
+RENDER.settings = function () { fillSettings(); updateInstallCard(); renderSecurity(); Drive.showStatus(); if (Drive.clientId()) Drive.loadGis().catch(() => {}); };
 function fillSettings() {
   $('#aiModel').value = S.settings.model || '';
   $('#aiModel').placeholder = S.cfg.model || 'gemini-2.5-flash';
@@ -1575,8 +2107,67 @@ function fillSettings() {
 [['#aiModel', 'model'], ['#userName', 'userName'], ['#clientId', 'clientId'], ['#linkCustomCats', 'linkCats']].forEach(([sel, k]) =>
   $(sel).addEventListener('input', (ev) => { S.settings[k] = ev.target.value.trim(); saveSettings(); }));
 $('#driveAuto').addEventListener('change', (ev) => { S.settings.driveAuto = ev.target.checked; saveSettings(); if (ev.target.checked) Drive.sync(true); });
+$('#linkAutoAI').addEventListener('change', (ev) => { S.settings.linkAutoAI = ev.target.checked; saveSettings(); });
+$('#bookmarklet').addEventListener('click', (ev) => { ev.preventDefault(); toast('Hãy kéo nút này lên thanh dấu trang của trình duyệt'); });
 $$('#themeChips button').forEach((b) => b.addEventListener('click', () => { S.settings.theme = b.dataset.theme; applyTheme(); saveSettings(); }));
 $('#logout').addEventListener('click', async () => { await api('/api/auth', { method: 'DELETE' }); location.reload(); });
+$('#lockNow').addEventListener('click', async () => {
+  if (!S.cfg.lockMinutes && !S.cfg.hasPasskey) return toast('Hãy bật “Tự khoá” hoặc Face ID bên dưới trước');
+  if (!S.cfg.lockMinutes) { await api('/api/auth/lock', { method: 'POST', body: { minutes: 720 } }); }
+  lockApp();
+});
+
+// ----- Bảo mật & thiết bị -----
+const LOCKS = [[0, 'Không tự khoá'], [5, '5 phút'], [15, '15 phút'], [60, '1 giờ'], [240, '4 giờ'], [720, '12 giờ']];
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 2 ? 'vừa xong' : m < 60 ? m + ' phút trước' : m < 1440 ? Math.round(m / 60) + ' giờ trước' : Math.round(m / 1440) + ' ngày trước'; };
+async function renderSecurity() {
+  const box = $('#security');
+  let d;
+  try { d = await api('/api/auth/security'); } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  S.cfg.lockMinutes = d.lockMinutes; S.cfg.hasPasskey = d.passkeys.length > 0;
+  box.innerHTML = `
+    <div class="sec-block">
+      <div class="sec-h">🫆 Face ID / vân tay</div>
+      ${d.passkeys.length ? d.passkeys.map((p) => `<div class="dev"><span>🔑 ${esc(p.name)}<small>Thêm ${new Date(p.created).toLocaleDateString('vi-VN')}${p.last ? ' · dùng ' + ago(p.last) : ''}</small></span><button class="btn ghost sm" data-pkdel="${esc(p.id)}">Xoá</button></div>`).join('')
+        : '<p class="muted small">Chưa bật. Bật để mở app bằng khuôn mặt / vân tay thay vì gõ mật khẩu.</p>'}
+      ${canPasskey() ? '<button class="btn primary sm" id="pkAdd">＋ Bật Face ID / vân tay cho máy này</button>' : '<p class="muted small">Trình duyệt này chưa hỗ trợ Face ID / vân tay.</p>'}
+    </div>
+    <div class="sec-block">
+      <div class="sec-h">⏱️ Tự khoá khi không dùng</div>
+      <select id="lockSel">${LOCKS.map(([m, t]) => `<option value="${m}" ${m === d.lockMinutes ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <p class="muted small">Sau khoảng thời gian này, mở lại app phải quét Face ID (hoặc nhập mật khẩu). Áp dụng cho mọi thiết bị.</p>
+    </div>
+    <div class="sec-block">
+      <div class="sec-h">🇬 Đăng nhập bằng Gmail</div>
+      ${d.google ? `<div class="dev"><span>✅ ${esc(d.google.email)}<small>Chỉ tài khoản này đăng nhập được</small></span><button class="btn ghost sm" id="gUnlink">Huỷ liên kết</button></div>`
+        : S.cfg.googleClientId ? '<p class="muted small">Liên kết Gmail của bạn để đăng nhập ở máy mới mà không cần mật khẩu.</p><div id="gLinkBtn"></div>' : '<p class="muted small">Cần nhập Google Client ID (mục Google Drive bên trên) trước.</p>'}
+    </div>
+    <div class="sec-block">
+      <div class="sec-h">📱 Thiết bị đang đăng nhập (${d.sessions.length})</div>
+      ${d.sessions.map((x) => `<div class="dev ${x.id === d.current ? 'me' : ''}"><span>${/iPhone|Android|iPad/.test(x.name) ? '📱' : '💻'} ${esc(x.name)}${x.id === d.current ? ' <b class="badge">máy này</b>' : ''}<small>${esc(x.method || '')} · hoạt động ${ago(x.last)}</small></span><button class="btn ghost sm" data-out="${x.id}">Đăng xuất</button></div>`).join('')}
+      <div class="row gap wrap" style="margin-top:8px"><button class="btn ghost sm" id="outOthers">Đăng xuất các máy khác</button><button class="btn danger sm" id="outAll">Đăng xuất tất cả</button></div>
+    </div>
+    <div class="tip">🆘 <b>Mất điện thoại?</b> Mở app trên máy khác → Cài đặt → Bảo mật → bấm <b>Đăng xuất</b> ở máy bị mất, có hiệu lực ngay. Nếu không còn máy nào đăng nhập: vào Netlify đổi <code>APP_PASSWORD</code> rồi deploy lại, mọi máy sẽ bị đăng xuất.</div>`;
+  $('#pkAdd')?.addEventListener('click', async () => {
+    try { await passkeyRegister(); toast('Đã bật Face ID / vân tay ✓'); if (!d.lockMinutes) toast('Mẹo: chọn “Tự khoá” bên dưới để app tự khoá khi bạn rời đi', 5000); renderSecurity(); }
+    catch (e) { toast(e.message, 4000); }
+  });
+  $$('[data-pkdel]').forEach((b) => (b.onclick = async () => { if (await askConfirm('Xoá Face ID / vân tay này?', 'Xoá')) { await api('/api/auth/passkey-delete', { method: 'POST', body: { id: b.dataset.pkdel } }); renderSecurity(); } }));
+  $('#lockSel').onchange = async (ev) => { await api('/api/auth/lock', { method: 'POST', body: { minutes: +ev.target.value } }); S.cfg.lockMinutes = +ev.target.value; toast('Đã lưu ✓'); };
+  $('#gUnlink')?.addEventListener('click', async () => { await api('/api/auth/google-unlink', { method: 'POST', body: {} }); renderSecurity(); });
+  if ($('#gLinkBtn')) googleButton($('#gLinkBtn'), async (credential) => {
+    try { const r = await api('/api/auth/google-link', { method: 'POST', body: { credential } }); toast('Đã liên kết ' + r.email); renderSecurity(); } catch (e) { toast(e.message, 4000); }
+  });
+  const logout = async (target, msg) => {
+    if (!(await askConfirm(msg, 'Đăng xuất'))) return;
+    const r = await api('/api/auth/logout', { method: 'POST', body: { target } });
+    if (r.self) return location.reload();
+    toast('Đã đăng xuất ✓'); renderSecurity();
+  };
+  $$('[data-out]').forEach((b) => (b.onclick = () => logout(b.dataset.out, b.dataset.out === d.current ? 'Đăng xuất khỏi máy này?' : 'Đăng xuất thiết bị này? Máy đó sẽ phải đăng nhập lại ngay.')));
+  $('#outOthers').onclick = () => logout('others', 'Đăng xuất tất cả các máy khác (giữ lại máy này)?');
+  $('#outAll').onclick = () => logout('all', 'Đăng xuất TẤT CẢ thiết bị, kể cả máy này?');
+}
 
 function download(name, text, type) {
   const a = document.createElement('a');
@@ -1584,7 +2175,7 @@ function download(name, text, type) {
   a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-$('#exportJson').addEventListener('click', () => download(`nhat-ky-${dayKey(localISO())}.json`, JSON.stringify({ app: 'nhat-ky-rieng', version: 1, exportedAt: new Date().toISOString(), entries: S.entries }, null, 1), 'application/json'));
+$('#exportJson').addEventListener('click', () => download(`nhat-ky-${dayKey(localISO())}.json`, JSON.stringify({ app: 'nhat-ky-rieng', version: 2, exportedAt: new Date().toISOString(), folders: S.folders, entries: S.entries }, null, 1), 'application/json'));
 $('#exportMd').addEventListener('click', () => {
   const months = {}; S.entries.forEach((e) => (months[e.date.slice(0, 7)] ||= []).push(e));
   download(`nhat-ky-${dayKey(localISO())}.md`, Object.keys(months).sort().reverse().map((m) => monthMarkdown(m, months[m])).join('\n\n'), 'text/markdown');
@@ -1593,6 +2184,7 @@ $('#importJson').addEventListener('change', async (ev) => {
   const f = ev.target.files[0]; if (!f) return;
   try {
     const d = JSON.parse(await f.text());
+    if (Array.isArray(d.folders)) { d.folders.forEach((f) => { if (f && f.id && !folderById(f.id)) S.folders.push(f); }); await saveFolders(); }
     const list = (Array.isArray(d) ? d : d.entries || []).map((x) => newEntry({ ...x, tags: x.tags || [], photos: x.photos || [], links: x.links || [] }));
     const r = await api('/api/entries', { method: 'POST', body: { entries: list } });
     S.entries = (await api('/api/entries')).entries.sort(byDateDesc);

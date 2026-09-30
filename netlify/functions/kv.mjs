@@ -1,11 +1,13 @@
 import { getStore } from '@netlify/blobs';
-import { json, deny, isAuthed } from '../lib/token.mjs';
+import { json } from '../lib/token.mjs';
+import { guard } from '../lib/session.mjs';
 
 // Lưu cài đặt, lịch sử chat với trợ lý, bản đồ file Google Drive...
 const store = () => getStore({ name: 'kv', consistency: 'strong' });
 
 export default async (req, context) => {
-  if (!(await isAuthed(req))) return deny();
+  const denied = await guard(req);
+  if (denied) return denied;
   const key = context.params?.key || '';
   if (!/^[a-z0-9_-]{1,40}$/.test(key)) return json({ error: 'key không hợp lệ' }, 400);
 

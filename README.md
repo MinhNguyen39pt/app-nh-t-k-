@@ -6,6 +6,10 @@ App gồm các phần:
 - **Kho link (📚)**: lưu link Facebook, YouTube, TikTok, Instagram hay bài báo. Dán link vào là lưu ngay: app tự lấy tiêu đề, ảnh và tên kênh. Bạn ghi chú *link này nói gì, vì sao lưu* (gõ hoặc nói) và chọn chủ đề: Khoa học, Công nghệ & AI, Tài chính & Đầu tư, Sức khỏe, Tâm lý, Lịch sử… Chủ đề riêng thêm được trong Cài đặt. AI có thể **gợi ý chủ đề** nhưng chỉ dựa vào tiêu đề, không xem video, không đọc trang nên rất nhẹ; tắt được trong Cài đặt.
   - Mỗi link có trạng thái 📌 Xem sau, ✅ Đã xem hoặc ⭐ Yêu thích. Lọc được theo chủ đề, nguồn và trạng thái, tìm được theo tiêu đề, ghi chú hoặc kênh. Video YouTube phát được ngay trong app.
   - **Lưu nhanh**: dán một hay nhiều link (mỗi dòng một link). Trên **Android**, sau khi cài app ra màn hình chính, bạn bấm *Chia sẻ → Nhật Ký* ngay trong Facebook hoặc YouTube. Trên **máy tính**, dùng nút dấu trang "📚 Lưu vào Nhật Ký" (xem Cài đặt).
+- **Thư mục mẹ – con & nhật ký con**: tạo thư mục lồng nhau (ví dụ Công việc → Dự án A), trong một nhật ký thêm nhiều **mục con**. Có 2 chế độ xem: **📅 Theo ngày** và **📁 Theo thư mục** (dạng cây, mở/thu gọn).
+- **🎵 Trình phát nhạc**: nghe file nhạc (MP3, M4A…) có sẵn trong Google Drive ngay trong app. Có danh sách theo thư mục, tìm kiếm, phát trộn, lặp lại, điều khiển trên màn hình khoá, và gắn bài đang nghe vào nhật ký. Lần đầu dùng, Google sẽ hỏi thêm quyền *chỉ đọc* file Drive.
+- **🔐 Bảo mật**: mở khoá bằng **Face ID / vân tay** (passkey, máy chủ xác minh thật), **tự khoá** sau 5 phút đến 12 giờ không dùng, **đăng nhập bằng Gmail** (chỉ tài khoản đã liên kết), **danh sách thiết bị** kèm nút đăng xuất từng máy hoặc tất cả (có hiệu lực ngay), và chặn dò mật khẩu (sai 5 lần thì khoá 15 phút).
+- **Trang chủ thân thiện**: lời chào theo giờ, chọn tâm trạng bằng 1 chạm, 8 ô thao tác nhanh (Viết, Nói, Ảnh, Check-in, Bài học, Lưu link, Nghe nhạc, Hỏi AI), mỗi ngày một câu gợi ý viết, hiệu ứng mừng khi giữ chuỗi ngày viết, và màu riêng cho từng loại ghi chép.
 - **Ghi nhanh bằng AI**: bạn kể lung tung một đoạn, AI tách thành một hoặc nhiều mục có tiêu đề, loại, thẻ, tâm trạng và thời điểm (hiểu được "hôm qua", "8h tối").
 - **Bản đồ kỷ niệm**: mọi mục có vị trí hiện trên bản đồ OpenStreetMap, kèm danh sách các nơi bạn hay tới.
 - **Thư viện ảnh**: ảnh được nén trước khi tải lên (tối đa 1800px) và có thêm bản thu nhỏ để trang tải nhanh.
@@ -61,11 +65,16 @@ App là PWA, có biểu tượng PNG và service worker nên cài được như 
 - **Máy tính (Chrome/Edge):** bấm biểu tượng cài đặt ở cuối thanh địa chỉ, hoặc vào **Cài đặt → 📲 Cài app** trong app.
 - Nếu mở link từ Zalo/Messenger/Facebook, app sẽ chạy trong trình duyệt riêng của các ứng dụng đó và không cài được. Hãy chọn **Mở bằng trình duyệt** trước.
 
-## 5. Cấu trúc code
+## 5. Khi mất điện thoại
+1. Mở app trên máy khác, vào **Cài đặt → 🔐 Bảo mật & thiết bị** và bấm **Đăng xuất** ở máy bị mất. Máy đó bị đăng xuất ngay.
+2. Nếu không còn máy nào đang đăng nhập: vào Netlify đổi `APP_PASSWORD` rồi deploy lại. Mọi máy sẽ bị đăng xuất.
+3. Nên bật trước **Face ID / vân tay** và **Tự khoá**, để người nhặt được điện thoại (dù đã mở khoá máy) cũng không mở được nhật ký.
+
+## 6. Cấu trúc code
 ```
 public/                  Giao diện (index.html, app.css, app.js)
 netlify/functions/
-  auth.mjs               Đăng nhập / đăng xuất / cấu hình
+  auth.mjs               Đăng nhập (mật khẩu, Face ID/passkey, Google), thiết bị, tự khoá
   (public/tuvi.js         Âm lịch + an sao tử vi, chạy trên trình duyệt)
   entries.mjs            Các mục nhật ký (Netlify Blobs, gộp theo updatedAt)
   photos.mjs             Lưu và đọc ảnh
@@ -73,7 +82,10 @@ netlify/functions/
   unfurl.mjs             Lấy tiêu đề và ảnh xem trước của link
 netlify/edge-functions/
   ai.js                  Gọi Gemini, stream câu trả lời (không bị giới hạn 10 giây)
-netlify/lib/token.mjs    Ký và kiểm tra phiên đăng nhập
+netlify/lib/token.mjs    Ký và kiểm tra dữ liệu (HMAC)
+netlify/lib/session.mjs  Phiên đăng nhập theo thiết bị, tự khoá, đăng xuất từ xa
+public/vendor/webauthn.js  Thư viện passkey (@simplewebauthn/browser)
+public/sw.js             Service worker (cài thành app)
 ```
 
 ## 6. Quyền riêng tư và giới hạn

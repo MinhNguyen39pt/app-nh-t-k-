@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
-import { json, deny, isAuthed } from '../lib/token.mjs';
+import { json } from '../lib/token.mjs';
+import { guard } from '../lib/session.mjs';
 
 const KEY = 'entries.json';
 const store = () => getStore({ name: 'nhatky', consistency: 'strong' });
@@ -29,13 +30,18 @@ function clean(e) {
     category: String(e.category || '').slice(0, 60),
     status: ['later', 'done', 'fav'].includes(e.status) ? e.status : '',
     summary: String(e.summary || '').slice(0, 20000),
+    // Thư mục, nhật ký con, bài nhạc gắn kèm
+    folderId: /^[\w-]{1,64}$/.test(e.folderId || '') ? e.folderId : '',
+    parentId: /^[\w-]{6,64}$/.test(e.parentId || '') && e.parentId !== e.id ? e.parentId : '',
+    music: e.music && typeof e.music === 'object' && e.music.id ? { id: String(e.music.id).slice(0, 100), name: String(e.music.name || '').slice(0, 200) } : null,
     createdAt: Number(e.createdAt) || Date.now(),
     updatedAt: Number(e.updatedAt) || Date.now(),
   };
 }
 
 export default async (req, context) => {
-  if (!(await isAuthed(req))) return deny();
+  const denied = await guard(req);
+  if (denied) return denied;
   const id = context.params?.id;
 
   if (req.method === 'GET') {

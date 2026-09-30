@@ -35,6 +35,23 @@ export function safeEq(a = '', b = '') {
   return r === 0;
 }
 
+// Ký / đọc một payload JSON bất kỳ (dùng cho phiên đăng nhập và thử thách passkey)
+export async function signPayload(obj) {
+  const p = b64u(enc.encode(JSON.stringify(obj)));
+  return p + '.' + (await sign(p));
+}
+export async function readPayload(t) {
+  if (!t) return null;
+  const [p, s] = t.split('.');
+  if (!p || !s || !safeEq(await sign(p), s)) return null;
+  try {
+    const o = JSON.parse(unb64u(p));
+    return o.exp && o.exp < Date.now() ? null : o;
+  } catch {
+    return null;
+  }
+}
+
 export async function makeToken() {
   const p = b64u(enc.encode(JSON.stringify({ iat: Date.now(), exp: Date.now() + MAX_AGE_DAYS * 864e5 })));
   return p + '.' + (await sign(p));
@@ -58,8 +75,8 @@ export function getCookie(req, name) {
 }
 
 export const COOKIE = 'nk_s';
-export const cookieHeader = (val, maxAge) =>
-  `${COOKIE}=${val}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+export const cookieHeader = (val, maxAge, name = COOKIE) =>
+  `${name}=${val}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 export const COOKIE_MAX_AGE = MAX_AGE_DAYS * 86400;
 
 export const isAuthed = (req) => checkToken(getCookie(req, COOKIE));

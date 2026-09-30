@@ -1,7 +1,7 @@
 // Service worker tối giản: giúp app cài được như app riêng và mở nhanh hơn.
 // Không bao giờ lưu /api (dữ liệu nhật ký luôn lấy mới từ máy chủ).
-const CACHE = 'nhat-ky-v1';
-const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/tuvi.js', '/manifest.webmanifest', '/icon-192.png'];
+const CACHE = 'nhat-ky-v3';
+const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/tuvi.js', '/vendor/webauthn.js', '/manifest.webmanifest', '/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));

@@ -1,12 +1,14 @@
 // Gọi Google Gemini. Chạy ở Edge nên stream được lâu, không bị giới hạn 10 giây.
-import { env, isAuthed } from '../lib/token.mjs';
+import { env } from '../lib/token.mjs';
 
 const err = (msg, status = 400) =>
   new Response(JSON.stringify({ error: msg }), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 
 export default async (req) => {
   if (req.method !== 'POST') return err('Method not allowed', 405);
-  if (!(await isAuthed(req))) return err('Chưa đăng nhập', 401);
+  // Hỏi function /api/auth xem phiên còn hợp lệ không (đã đăng xuất / đang khoá thì từ chối)
+  const chk = await fetch(new URL('/api/auth?check=1', req.url), { headers: { cookie: req.headers.get('cookie') || '' } }).catch(() => null);
+  if (!chk || chk.status !== 204) return err('Chưa đăng nhập hoặc app đang khoá', 401);
   const key = env('GEMINI_API_KEY');
   if (!key) return err('Chưa khai báo GEMINI_API_KEY trên Netlify.', 500);
 

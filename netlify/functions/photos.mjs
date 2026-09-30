@@ -1,11 +1,13 @@
 import { getStore } from '@netlify/blobs';
-import { json, deny, isAuthed } from '../lib/token.mjs';
+import { json } from '../lib/token.mjs';
+import { guard } from '../lib/session.mjs';
 
 const store = () => getStore({ name: 'photos', consistency: 'strong' });
 const OK_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 export default async (req, context) => {
-  if (!(await isAuthed(req))) return deny();
+  const denied = await guard(req);
+  if (denied) return denied;
   const id = context.params?.id || '';
   if (!/^[\w-]{6,80}$/.test(id)) return json({ error: 'id không hợp lệ' }, 400);
   const url = new URL(req.url);
